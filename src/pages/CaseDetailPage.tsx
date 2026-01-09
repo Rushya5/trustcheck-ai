@@ -46,16 +46,12 @@ export default function CaseDetailPage() {
   // Delete media mutation
   const deleteMedia = useMutation({
     mutationFn: async ({ mediaId, filePath }: { mediaId: string; filePath: string }) => {
-      // Delete from storage
-      await supabase.storage.from('media-files').remove([filePath]);
-      
-      // Delete from database (will cascade delete analysis_results)
-      const { error } = await supabase
-        .from('media_files')
-        .delete()
-        .eq('id', mediaId);
-      
+      const { data, error } = await supabase.functions.invoke('delete-media', {
+        body: { mediaId, filePath },
+      });
+
       if (error) throw error;
+      return data;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['case-media', id] });
