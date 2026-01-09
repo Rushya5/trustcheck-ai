@@ -186,9 +186,21 @@ async function runRealityDefenderClassifier(blob: Blob, fileName: string, REALIT
     }
 
     const presignedData = await presignedResponse.json();
-    const { url: signedUrl, request_id } = presignedData;
-    
-    console.log("Reality Defender upload URL obtained, request_id:", request_id);
+    console.log("Reality Defender presigned response:", JSON.stringify(presignedData));
+
+    // Reality Defender docs don't guarantee field names in the examples shown in our UI,
+    // so support the common variants we've seen.
+    const signedUrl = presignedData.presign_url ?? presignedData.presigned_url ?? presignedData.presignUrl ?? presignedData.url;
+    const requestId = presignedData.requestId ?? presignedData.request_id ?? presignedData.upload_id ?? presignedData.id;
+
+    if (!signedUrl || typeof signedUrl !== "string") {
+      throw new Error("Reality Defender presigned response missing upload URL (expected presign_url/url)");
+    }
+    if (!requestId || typeof requestId !== "string") {
+      throw new Error("Reality Defender presigned response missing request id (expected requestId/request_id)");
+    }
+
+    console.log("Reality Defender upload URL obtained, requestId:", requestId);
 
     // Step 2: Upload the file to the presigned URL
     const uploadResponse = await fetch(signedUrl, {
@@ -200,7 +212,7 @@ async function runRealityDefenderClassifier(blob: Blob, fileName: string, REALIT
       console.error("Reality Defender upload error:", uploadResponse.status);
       throw new Error(`Reality Defender upload failed: ${uploadResponse.status}`);
     }
-    
+
     console.log("File uploaded to Reality Defender, polling for results...");
 
     // Step 3: Poll for results (Reality Defender processes asynchronously)
@@ -210,7 +222,7 @@ async function runRealityDefenderClassifier(blob: Blob, fileName: string, REALIT
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
       await new Promise(resolve => setTimeout(resolve, pollInterval));
       
-      const resultResponse = await fetch(`https://api.prd.realitydefender.xyz/api/media/users/${request_id}`, {
+      const resultResponse = await fetch(`https://api.prd.realitydefender.xyz/api/media/users/${requestId}`, {
         method: "GET",
         headers: {
           "X-API-KEY": REALITY_DEFENDER_API_KEY,
