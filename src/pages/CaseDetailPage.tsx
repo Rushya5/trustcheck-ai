@@ -1,6 +1,6 @@
 import { useParams, useNavigate } from 'react-router-dom';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { useEffect } from 'react';
+import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
+import { useEffect, useState } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { Header } from '@/components/layout/Header';
@@ -9,6 +9,17 @@ import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { CredibilityMeter } from '@/components/dashboard/CredibilityMeter';
 import { formatDistanceToNow } from 'date-fns';
+import { toast } from 'sonner';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import {
   ArrowLeft,
   Eye,
@@ -21,7 +32,8 @@ import {
   Clock,
   Loader2,
   FileQuestion,
-  Play
+  Play,
+  Trash2
 } from 'lucide-react';
 
 export default function CaseDetailPage() {
@@ -29,6 +41,33 @@ export default function CaseDetailPage() {
   const { user } = useAuth();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const [mediaToDelete, setMediaToDelete] = useState<{ id: string; filePath: string; fileName: string } | null>(null);
+
+  // Delete media mutation
+  const deleteMedia = useMutation({
+    mutationFn: async ({ mediaId, filePath }: { mediaId: string; filePath: string }) => {
+      // Delete from storage
+      await supabase.storage.from('media-files').remove([filePath]);
+      
+      // Delete from database (will cascade delete analysis_results)
+      const { error } = await supabase
+        .from('media_files')
+        .delete()
+        .eq('id', mediaId);
+      
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['case-media', id] });
+      queryClient.invalidateQueries({ queryKey: ['cases'] });
+      toast.success('Media file deleted successfully');
+      setMediaToDelete(null);
+    },
+    onError: (error) => {
+      console.error('Delete error:', error);
+      toast.error('Failed to delete media file');
+    },
+  });
 
   // Fetch case details
   const { data: caseData, isLoading: caseLoading, error: caseError } = useQuery({
@@ -302,16 +341,33 @@ export default function CaseDetailPage() {
                         </p>
                       </div>
 
-                      {/* View Button */}
-                      <Button variant="outline" size="sm">
-                        {analysisStatus === 'completed' ? (
-                          <Eye className="h-4 w-4" />
-                        ) : analysisStatus === 'processing' ? (
-                          <Loader2 className="h-4 w-4 animate-spin" />
-                        ) : (
-                          <Play className="h-4 w-4" />
-                        )}
-                      </Button>
+                      {/* Action Buttons */}
+                      <div className="flex items-center gap-2">
+                        <Button variant="outline" size="sm">
+                          {analysisStatus === 'completed' ? (
+                            <Eye className="h-4 w-4" />
+                          ) : analysisStatus === 'processing' ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : (
+                            <Play className="h-4 w-4" />
+                          )}
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setMediaToDelete({
+                              id: media.id,
+                              filePath: media.file_path,
+                              fileName: media.file_name,
+                            });
+                          }}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
                     </div>
                   </div>
                 );
@@ -320,6 +376,39 @@ export default function CaseDetailPage() {
           )}
         </div>
       </div>
+
+      {/* Delete Media Confirmation Dialog */}
+      <AlertDialog open={!!mediaToDelete} onOpenChange={(open) => !open && setMediaToDelete(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Media File</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete "{mediaToDelete?.fileName}"? This will also delete any associated analysis results. This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                if (mediaToDelete) {
+                  deleteMedia.mutate({
+                    mediaId: mediaToDelete.id,
+                    filePath: mediaToDelete.filePath,
+                  });
+                }
+              }}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {deleteMedia.isPending ? (
+                <Loader2 className="h-4 w-4 animate-spin mr-2" />
+              ) : (
+                <Trash2 className="h-4 w-4 mr-2" />
+              )}
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
