@@ -61,10 +61,30 @@ export default function AnalysisPage() {
       value: Math.random() * 0.5
     }));
 
-  // Parse artifacts arrays
-  const visualArtifacts = (analysis?.visual_artifacts as string[]) || [];
-  const audioArtifacts = (analysis?.audio_artifacts as string[]) || [];
-  const metadataIssues = (analysis?.metadata_issues as string[]) || [];
+  // Parse artifacts arrays - handle both string[] and object[] formats
+  type ArtifactObject = { type?: string; location?: string; severity?: string; description?: string };
+  
+  const parseArtifacts = (artifacts: unknown): string[] => {
+    if (!Array.isArray(artifacts)) return [];
+    return artifacts.map((item: unknown) => {
+      if (typeof item === 'string') return item;
+      if (typeof item === 'object' && item !== null) {
+        const obj = item as ArtifactObject;
+        // Build a readable string from the object
+        const parts: string[] = [];
+        if (obj.type) parts.push(obj.type);
+        if (obj.location) parts.push(`at ${obj.location}`);
+        if (obj.severity) parts.push(`(${obj.severity})`);
+        if (obj.description) parts.push(obj.description);
+        return parts.join(' ') || 'Unknown artifact';
+      }
+      return String(item);
+    });
+  };
+
+  const visualArtifacts = parseArtifacts(analysis?.visual_artifacts);
+  const audioArtifacts = parseArtifacts(analysis?.audio_artifacts);
+  const metadataIssues = parseArtifacts(analysis?.metadata_issues);
   const exifData = (analysis?.exif_data as Record<string, string>) || {};
 
   // Calculate stats
