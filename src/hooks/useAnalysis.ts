@@ -72,11 +72,15 @@ interface AnalyzeParams {
   mediaType: 'image' | 'video' | 'audio';
 }
 
+interface AnalyzeWithAIParams extends AnalyzeParams {
+  filePath: string;
+}
+
 // Call the AI analysis edge function
-async function analyzeWithAI({ mediaId, mediaUrl, mediaType }: AnalyzeParams): Promise<void> {
+async function analyzeWithAI({ mediaId, mediaUrl, mediaType, filePath }: AnalyzeWithAIParams): Promise<void> {
   let frameUrls: string[] | undefined;
   
-  // For videos, extract frames client-side
+  // For videos, extract frames client-side (these are already base64)
   if (mediaType === 'video') {
     try {
       frameUrls = await extractVideoFrames(mediaUrl, 10);
@@ -97,6 +101,7 @@ async function analyzeWithAI({ mediaId, mediaUrl, mediaType }: AnalyzeParams): P
       body: JSON.stringify({ 
         mediaId, 
         imageUrl: mediaUrl,
+        filePath, // Pass file path for direct storage download
         mediaType,
         frameUrls 
       }),
@@ -207,14 +212,15 @@ export function useStartAnalysis() {
       }, 500);
 
       try {
-        // Get the public URL for the media
+        // Get the public URL for the media (used for video frame extraction)
         const mediaUrl = await getMediaUrl(mediaFile.file_path);
         
-        // Call AI analysis with media type
+        // Call AI analysis with file path for direct storage access
         await analyzeWithAI({
           mediaId,
           mediaUrl,
-          mediaType: mediaFile.media_type as 'image' | 'video' | 'audio'
+          mediaType: mediaFile.media_type as 'image' | 'video' | 'audio',
+          filePath: mediaFile.file_path, // Pass the file path for storage download
         });
         
         clearInterval(progressInterval);

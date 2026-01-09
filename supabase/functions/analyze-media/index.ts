@@ -6,30 +6,56 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-// Convert image URL to base64
-async function imageUrlToBase64(url: string): Promise<string> {
+// Convert ArrayBuffer to base64
+function arrayBufferToBase64(buffer: ArrayBuffer): string {
+  const uint8Array = new Uint8Array(buffer);
+  let binary = '';
+  for (let i = 0; i < uint8Array.length; i++) {
+    binary += String.fromCharCode(uint8Array[i]);
+  }
+  return btoa(binary);
+}
+
+// Download file from Supabase storage and convert to base64
+async function downloadAndConvertToBase64(
+  supabase: any,
+  filePath: string
+): Promise<string> {
+  const { data, error } = await supabase.storage
+    .from('media')
+    .download(filePath);
+
+  if (error) {
+    throw new Error(`Failed to download file: ${error.message}`);
+  }
+
+  const arrayBuffer = await data.arrayBuffer();
+  const base64 = arrayBufferToBase64(arrayBuffer);
+  const mimeType = data.type || 'image/jpeg';
+  
+  return `data:${mimeType};base64,${base64}`;
+}
+
+// Convert image URL/data to base64
+async function imageToBase64(imageData: string, supabase?: any, filePath?: string): Promise<string> {
   // If already base64, return as is
-  if (url.startsWith('data:')) {
-    return url;
+  if (imageData.startsWith('data:')) {
+    return imageData;
   }
   
-  // Fetch the image
-  const response = await fetch(url);
+  // If we have a file path and supabase client, download directly from storage
+  if (supabase && filePath) {
+    return await downloadAndConvertToBase64(supabase, filePath);
+  }
+  
+  // Fallback: try to fetch from URL
+  const response = await fetch(imageData);
   if (!response.ok) {
     throw new Error(`Failed to fetch image: ${response.status}`);
   }
   
   const arrayBuffer = await response.arrayBuffer();
-  const uint8Array = new Uint8Array(arrayBuffer);
-  
-  // Convert to base64
-  let binary = '';
-  for (let i = 0; i < uint8Array.length; i++) {
-    binary += String.fromCharCode(uint8Array[i]);
-  }
-  const base64 = btoa(binary);
-  
-  // Determine MIME type
+  const base64 = arrayBufferToBase64(arrayBuffer);
   const contentType = response.headers.get('content-type') || 'image/jpeg';
   
   return `data:${contentType};base64,${base64}`;
@@ -37,9 +63,11 @@ async function imageUrlToBase64(url: string): Promise<string> {
 
 // Analyze a single image/frame with AI
 async function analyzeFrame(
-  imageUrl: string,
+  imageData: string,
   frameIndex: number | null,
-  LOVABLE_API_KEY: string
+  LOVABLE_API_KEY: string,
+  supabase?: any,
+  filePath?: string
 ): Promise<any> {
   const frameContext = frameIndex !== null 
     ? `This is frame ${frameIndex + 1} from a video.` 
@@ -48,10 +76,10 @@ async function analyzeFrame(
   // Convert image to base64 so AI can access it directly
   let base64Image: string;
   try {
-    base64Image = await imageUrlToBase64(imageUrl);
+    base64Image = await imageToBase64(imageData, supabase, filePath);
   } catch (err) {
-    console.error("Failed to fetch image:", err);
-    throw new Error(`Could not access image at URL: ${imageUrl}`);
+    console.error("Failed to process image:", err);
+    throw new Error(`Could not process image: ${err instanceof Error ? err.message : 'Unknown error'}`);
   }
 
   const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
@@ -138,11 +166,11 @@ serve(async (req) => {
   }
 
   try {
-    const { mediaId, imageUrl, mediaType, frameUrls } = await req.json();
+    const { mediaId, imageUrl, filePath, mediaType, frameUrls } = await req.json();
 
-    if (!mediaId || (!imageUrl && !frameUrls)) {
+    if (!mediaId || (!imageUrl && !frameUrls && !filePath)) {
       return new Response(
-        JSON.stringify({ error: "mediaId and imageUrl or frameUrls are required" }),
+        JSON.stringify({ error: "mediaId and imageUrl/filePath or frameUrls are required" }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
@@ -171,7 +199,7 @@ serve(async (req) => {
       for (let i = 0; i < maxFrames; i++) {
         const frameUrl = frameUrls[Math.floor(i * frameUrls.length / maxFrames)];
         framePromises.push(
-          analyzeFrame(frameUrl, i, LOVABLE_API_KEY)
+          analyzeFrame(frameUrl, i, LOVABLE_API_KEY, supabase, undefined)
             .catch(err => {
               console.error(`Frame ${i} analysis failed:`, err);
               return null;
@@ -224,8 +252,8 @@ serve(async (req) => {
         deepfake_frame_count: deepfakeFrames,
       };
     } else {
-      // Image analysis: single frame
-      analysis = await analyzeFrame(imageUrl, null, LOVABLE_API_KEY);
+      // Image analysis: single frame - pass filePath for direct storage download
+      analysis = await analyzeFrame(imageUrl || '', null, LOVABLE_API_KEY, supabase, filePath);
     }
 
     // Map verdict to credibility level
