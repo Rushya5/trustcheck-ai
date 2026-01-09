@@ -188,16 +188,34 @@ async function runRealityDefenderClassifier(blob: Blob, fileName: string, REALIT
     const presignedData = await presignedResponse.json();
     console.log("Reality Defender presigned response:", JSON.stringify(presignedData));
 
-    // Reality Defender docs don't guarantee field names in the examples shown in our UI,
-    // so support the common variants we've seen.
-    const signedUrl = presignedData.presign_url ?? presignedData.presigned_url ?? presignedData.presignUrl ?? presignedData.url;
-    const requestId = presignedData.requestId ?? presignedData.request_id ?? presignedData.upload_id ?? presignedData.id;
+    // Reality Defender responses can be nested (e.g. { code, response: { signedUrl }, requestId })
+    // so support both top-level and nested variants.
+    const signedUrl =
+      presignedData?.response?.signedUrl ??
+      presignedData?.response?.url ??
+      presignedData?.presign_url ??
+      presignedData?.presigned_url ??
+      presignedData?.presignUrl ??
+      presignedData?.signedUrl ??
+      presignedData?.url;
+
+    const requestId =
+      presignedData?.requestId ??
+      presignedData?.request_id ??
+      presignedData?.response?.requestId ??
+      presignedData?.response?.request_id ??
+      presignedData?.upload_id ??
+      presignedData?.id;
 
     if (!signedUrl || typeof signedUrl !== "string") {
-      throw new Error("Reality Defender presigned response missing upload URL (expected presign_url/url)");
+      throw new Error(
+        "Reality Defender presigned response missing upload URL (expected response.signedUrl or presign_url/url)"
+      );
     }
     if (!requestId || typeof requestId !== "string") {
-      throw new Error("Reality Defender presigned response missing request id (expected requestId/request_id)");
+      throw new Error(
+        "Reality Defender presigned response missing request id (expected requestId/request_id)"
+      );
     }
 
     console.log("Reality Defender upload URL obtained, requestId:", requestId);
