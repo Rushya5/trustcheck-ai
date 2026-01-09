@@ -22,11 +22,12 @@ async function downloadAndConvertToBase64(
   filePath: string
 ): Promise<string> {
   const { data, error } = await supabase.storage
-    .from('media')
+    .from('media-files')
     .download(filePath);
 
   if (error) {
-    throw new Error(`Failed to download file: ${error.message}`);
+    const msg = typeof error === 'object' ? JSON.stringify(error) : String(error);
+    throw new Error(`Failed to download file: ${msg}`);
   }
 
   const arrayBuffer = await data.arrayBuffer();
