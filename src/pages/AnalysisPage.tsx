@@ -8,10 +8,12 @@ import { ExplanationPanel } from '@/components/analysis/ExplanationPanel';
 import { FrameTimeline } from '@/components/analysis/FrameTimeline';
 import { BlockchainVerification } from '@/components/blockchain/BlockchainVerification';
 import { useAnalysis } from '@/hooks/useAnalysis';
+import { generateForensicReport } from '@/lib/generateForensicReport';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Skeleton } from '@/components/ui/skeleton';
+import { toast } from 'sonner';
 import { 
   Eye, 
   Music, 
@@ -30,6 +32,26 @@ export default function AnalysisPage() {
   const navigate = useNavigate();
   const { analysis, isLoading, error } = useAnalysis(mediaId);
   const [selectedFrame] = useState(0);
+  const [isGeneratingReport, setIsGeneratingReport] = useState(false);
+
+  const handleDownloadReport = async () => {
+    if (!analysis) return;
+    
+    setIsGeneratingReport(true);
+    try {
+      await generateForensicReport({
+        analysis,
+        caseName: 'Forensic Case',
+        mediaFileName: 'Media File'
+      });
+      toast.success('Report downloaded successfully');
+    } catch (err) {
+      console.error('Failed to generate report:', err);
+      toast.error('Failed to generate report');
+    } finally {
+      setIsGeneratingReport(false);
+    }
+  };
 
   // Generate heatmap data from analysis or default
   const heatmapData = analysis?.heatmap_data as Array<{ x: number; y: number; value: number }> || 
@@ -172,9 +194,18 @@ export default function AnalysisPage() {
                 <Share2 className="h-4 w-4 mr-2" />
                 Share
               </Button>
-              <Button variant="forensic" size="sm">
-                <Download className="h-4 w-4 mr-2" />
-                Report
+              <Button 
+                variant="forensic" 
+                size="sm" 
+                onClick={handleDownloadReport}
+                disabled={isGeneratingReport}
+              >
+                {isGeneratingReport ? (
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                ) : (
+                  <Download className="h-4 w-4 mr-2" />
+                )}
+                {isGeneratingReport ? 'Generating...' : 'Report'}
               </Button>
             </div>
           </div>
