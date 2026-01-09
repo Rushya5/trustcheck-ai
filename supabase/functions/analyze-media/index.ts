@@ -6,6 +6,35 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
+// Convert image URL to base64
+async function imageUrlToBase64(url: string): Promise<string> {
+  // If already base64, return as is
+  if (url.startsWith('data:')) {
+    return url;
+  }
+  
+  // Fetch the image
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`Failed to fetch image: ${response.status}`);
+  }
+  
+  const arrayBuffer = await response.arrayBuffer();
+  const uint8Array = new Uint8Array(arrayBuffer);
+  
+  // Convert to base64
+  let binary = '';
+  for (let i = 0; i < uint8Array.length; i++) {
+    binary += String.fromCharCode(uint8Array[i]);
+  }
+  const base64 = btoa(binary);
+  
+  // Determine MIME type
+  const contentType = response.headers.get('content-type') || 'image/jpeg';
+  
+  return `data:${contentType};base64,${base64}`;
+}
+
 // Analyze a single image/frame with AI
 async function analyzeFrame(
   imageUrl: string,
@@ -15,6 +44,15 @@ async function analyzeFrame(
   const frameContext = frameIndex !== null 
     ? `This is frame ${frameIndex + 1} from a video.` 
     : "This is a still image.";
+
+  // Convert image to base64 so AI can access it directly
+  let base64Image: string;
+  try {
+    base64Image = await imageUrlToBase64(imageUrl);
+  } catch (err) {
+    console.error("Failed to fetch image:", err);
+    throw new Error(`Could not access image at URL: ${imageUrl}`);
+  }
 
   const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
     method: "POST",
@@ -68,7 +106,7 @@ Respond with a JSON object (no markdown, just raw JSON):
             },
             {
               type: "image_url",
-              image_url: { url: imageUrl }
+              image_url: { url: base64Image }
             }
           ]
         }
