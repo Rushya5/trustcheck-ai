@@ -4,18 +4,25 @@ import {
   AlertTriangle, 
   CheckCircle, 
   TrendingUp,
-  Clock
+  Clock,
+  Loader2
 } from 'lucide-react';
 import { Header } from '@/components/layout/Header';
 import { StatsCard } from '@/components/dashboard/StatsCard';
 import { CaseCard } from '@/components/dashboard/CaseCard';
 import { RecentActivity } from '@/components/dashboard/RecentActivity';
 import { CredibilityMeter } from '@/components/dashboard/CredibilityMeter';
-import { mockCases } from '@/lib/mockData';
 import { Button } from '@/components/ui/button';
 import { Link } from 'react-router-dom';
+import { useCases } from '@/hooks/useCases';
+import { useStats } from '@/hooks/useStats';
 
 export default function Dashboard() {
+  const { cases, isLoading: casesLoading } = useCases();
+  const { data: stats, isLoading: statsLoading } = useStats();
+
+  const recentCases = cases.slice(0, 3);
+
   return (
     <div className="min-h-screen">
       <Header 
@@ -26,37 +33,44 @@ export default function Dashboard() {
       <div className="p-6 space-y-6">
         {/* Stats Grid */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-          <StatsCard
-            title="Total Cases"
-            value={24}
-            subtitle="Active investigations"
-            icon={FileSearch}
-            trend={{ value: 12, positive: true }}
-            variant="primary"
-          />
-          <StatsCard
-            title="Deepfakes Detected"
-            value={156}
-            subtitle="This month"
-            icon={AlertTriangle}
-            trend={{ value: 8, positive: false }}
-            variant="danger"
-          />
-          <StatsCard
-            title="Verified Authentic"
-            value={342}
-            subtitle="Media cleared"
-            icon={CheckCircle}
-            trend={{ value: 15, positive: true }}
-            variant="trust"
-          />
-          <StatsCard
-            title="Pending Analysis"
-            value={18}
-            subtitle="In queue"
-            icon={Clock}
-            variant="warning"
-          />
+          {statsLoading ? (
+            Array.from({ length: 4 }).map((_, i) => (
+              <div key={i} className="forensic-card p-5 animate-pulse">
+                <div className="h-20 bg-muted rounded" />
+              </div>
+            ))
+          ) : (
+            <>
+              <StatsCard
+                title="Total Cases"
+                value={stats?.totalCases ?? 0}
+                subtitle="Active investigations"
+                icon={FileSearch}
+                variant="primary"
+              />
+              <StatsCard
+                title="Deepfakes Detected"
+                value={stats?.deepfakesDetected ?? 0}
+                subtitle="Manipulated media"
+                icon={AlertTriangle}
+                variant="danger"
+              />
+              <StatsCard
+                title="Verified Authentic"
+                value={stats?.verifiedAuthentic ?? 0}
+                subtitle="Media cleared"
+                icon={CheckCircle}
+                variant="trust"
+              />
+              <StatsCard
+                title="Pending Analysis"
+                value={stats?.pendingAnalyses ?? 0}
+                subtitle="In queue"
+                icon={Clock}
+                variant="warning"
+              />
+            </>
+          )}
         </div>
 
         {/* Main Content Grid */}
@@ -64,22 +78,40 @@ export default function Dashboard() {
           {/* Cases Section */}
           <div className="lg:col-span-2 space-y-4">
             <div className="flex items-center justify-between">
-              <h2 className="text-lg font-semibold text-foreground">Active Cases</h2>
+              <h2 className="text-lg font-semibold text-foreground">Recent Cases</h2>
               <Link to="/cases">
                 <Button variant="ghost" size="sm">View All</Button>
               </Link>
             </div>
-            <div className="space-y-3">
-              {mockCases.map((caseData, index) => (
-                <div 
-                  key={caseData.id}
-                  className="animate-fade-in"
-                  style={{ animationDelay: `${index * 100}ms` }}
-                >
-                  <CaseCard caseData={caseData} />
-                </div>
-              ))}
-            </div>
+            
+            {casesLoading ? (
+              <div className="flex items-center justify-center py-12">
+                <Loader2 className="h-8 w-8 animate-spin text-primary" />
+              </div>
+            ) : recentCases.length > 0 ? (
+              <div className="space-y-3">
+                {recentCases.map((caseData, index) => (
+                  <div 
+                    key={caseData.id}
+                    className="animate-fade-in"
+                    style={{ animationDelay: `${index * 100}ms` }}
+                  >
+                    <CaseCard caseData={caseData} />
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="forensic-card p-12 text-center">
+                <FileSearch className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
+                <h3 className="font-semibold text-foreground mb-2">No cases yet</h3>
+                <p className="text-sm text-muted-foreground mb-4">
+                  Start your first investigation by uploading media for analysis.
+                </p>
+                <Link to="/upload">
+                  <Button variant="forensic">Create First Case</Button>
+                </Link>
+              </div>
+            )}
           </div>
 
           {/* Right Sidebar */}
@@ -87,13 +119,13 @@ export default function Dashboard() {
             {/* Threat Level */}
             <div className="forensic-card p-6">
               <h3 className="font-semibold text-foreground mb-4 text-center">
-                Global Threat Level
+                Platform Trust Level
               </h3>
               <div className="flex justify-center">
-                <CredibilityMeter score={62} size="lg" />
+                <CredibilityMeter score={stats?.avgCredibility ?? 50} size="lg" />
               </div>
               <p className="text-center text-xs text-muted-foreground mt-4">
-                Based on 498 analyses today
+                Based on {stats?.completedAnalyses ?? 0} analyses
               </p>
             </div>
 
@@ -124,10 +156,10 @@ export default function Dashboard() {
                 <span>View Reports</span>
               </Button>
             </Link>
-            <Link to="/settings">
+            <Link to="/blockchain">
               <Button variant="glass" className="w-full h-auto py-4 flex-col gap-2">
-                <AlertTriangle className="h-6 w-6" />
-                <span>Threat Feed</span>
+                <CheckCircle className="h-6 w-6" />
+                <span>Verify Hash</span>
               </Button>
             </Link>
           </div>

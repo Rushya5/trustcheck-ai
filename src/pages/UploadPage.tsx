@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Header } from '@/components/layout/Header';
 import { MediaUploader } from '@/components/upload/MediaUploader';
 import { Button } from '@/components/ui/button';
@@ -6,14 +7,117 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { mockCases } from '@/lib/mockData';
-import { ArrowRight, Plus } from 'lucide-react';
+import { useCases } from '@/hooks/useCases';
+import { useMediaFiles } from '@/hooks/useMediaFiles';
+import { useStartAnalysis } from '@/hooks/useAnalysis';
+import { useActivityLogs } from '@/hooks/useActivityLogs';
+import { ArrowRight, Plus, Loader2 } from 'lucide-react';
+import { toast } from 'sonner';
 
 export default function UploadPage() {
+  const navigate = useNavigate();
+  const { cases, createCase } = useCases();
+  const { uploadMedia } = useMediaFiles();
+  const { startAnalysis } = useStartAnalysis();
+  const { logActivity } = useActivityLogs();
+  
   const [selectedCase, setSelectedCase] = useState<string>('');
   const [newCaseName, setNewCaseName] = useState('');
   const [newCaseDescription, setNewCaseDescription] = useState('');
   const [createNew, setCreateNew] = useState(false);
+  const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  
+  const [analysisOptions, setAnalysisOptions] = useState({
+    visual: true,
+    audio: true,
+    metadata: true,
+    contextual: false,
+  });
+
+  const handleFilesUploaded = (files: File[]) => {
+    setUploadedFiles(prev => [...prev, ...files]);
+  };
+
+  const handleSubmit = async () => {
+    if (!selectedCase && !createNew) {
+      toast.error('Please select or create a case');
+      return;
+    }
+
+    if (createNew && !newCaseName.trim()) {
+      toast.error('Please enter a case name');
+      return;
+    }
+
+    if (uploadedFiles.length === 0) {
+      toast.error('Please upload at least one file');
+      return;
+    }
+
+    setIsSubmitting(true);
+
+    try {
+      let caseId = selectedCase;
+
+      // Create new case if needed
+      if (createNew) {
+        const newCase = await createCase.mutateAsync({
+          title: newCaseName,
+          description: newCaseDescription,
+          priority: 'medium',
+        });
+        caseId = newCase.id;
+
+        await logActivity.mutateAsync({
+          action: 'create_case',
+          title: 'New case created',
+          description: newCaseName,
+          caseId: caseId,
+          icon: 'FileSearch',
+          iconColor: 'text-primary',
+        });
+
+        toast.success(`Case "${newCaseName}" created`);
+      }
+
+      // Upload files
+      for (const file of uploadedFiles) {
+        const media = await uploadMedia.mutateAsync({ file, caseId });
+
+        await logActivity.mutateAsync({
+          action: 'upload_media',
+          title: 'Media uploaded',
+          description: file.name,
+          caseId,
+          mediaId: media.id,
+          icon: 'Upload',
+          iconColor: 'text-primary',
+        });
+
+        // Start analysis
+        toast.info(`Starting analysis for ${file.name}...`);
+        await startAnalysis.mutateAsync(media.id);
+
+        await logActivity.mutateAsync({
+          action: 'analysis_complete',
+          title: 'Analysis complete',
+          description: file.name,
+          caseId,
+          mediaId: media.id,
+          icon: 'CheckCircle',
+          iconColor: 'text-trust',
+        });
+      }
+
+      toast.success('All files uploaded and analyzed!');
+      navigate(`/cases/${caseId}`);
+    } catch (error) {
+      toast.error('Error: ' + (error as Error).message);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
 
   return (
     <div className="min-h-screen">
@@ -37,9 +141,9 @@ export default function UploadPage() {
                       <SelectValue placeholder="Select a case..." />
                     </SelectTrigger>
                     <SelectContent>
-                      {mockCases.map((c) => (
+                      {cases.map((c) => (
                         <SelectItem key={c.id} value={c.id}>
-                          {c.name}
+                          {c.case_number} - {c.title}
                         </SelectItem>
                       ))}
                     </SelectContent>
@@ -55,7 +159,10 @@ export default function UploadPage() {
                 <Button 
                   variant="outline" 
                   className="w-full"
-                  onClick={() => setCreateNew(true)}
+                  onClick={() => {
+                    setCreateNew(true);
+                    setSelectedCase('');
+                  }}
                 >
                   <Plus className="h-4 w-4 mr-2" />
                   Create New Case
@@ -97,7 +204,7 @@ export default function UploadPage() {
         {/* Media Upload */}
         <div className="forensic-card p-6">
           <h3 className="font-semibold text-foreground mb-4">Upload Media</h3>
-          <MediaUploader />
+          <MediaUploader onUpload={handleFilesUploaded} />
         </div>
 
         {/* Analysis Options */}
@@ -106,7 +213,12 @@ export default function UploadPage() {
           
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <label className="flex items-start gap-3 p-4 rounded-lg border border-border hover:border-primary/50 cursor-pointer transition-colors">
-              <input type="checkbox" defaultChecked className="mt-1 accent-primary" />
+              <input 
+                type="checkbox" 
+                checked={analysisOptions.visual}
+                onChange={(e) => setAnalysisOptions(prev => ({ ...prev, visual: e.target.checked }))}
+                className="mt-1 accent-primary" 
+              />
               <div>
                 <p className="font-medium text-foreground">Visual Forensics</p>
                 <p className="text-xs text-muted-foreground">GAN detection, ELA, face analysis</p>
@@ -114,7 +226,12 @@ export default function UploadPage() {
             </label>
 
             <label className="flex items-start gap-3 p-4 rounded-lg border border-border hover:border-primary/50 cursor-pointer transition-colors">
-              <input type="checkbox" defaultChecked className="mt-1 accent-primary" />
+              <input 
+                type="checkbox" 
+                checked={analysisOptions.audio}
+                onChange={(e) => setAnalysisOptions(prev => ({ ...prev, audio: e.target.checked }))}
+                className="mt-1 accent-primary" 
+              />
               <div>
                 <p className="font-medium text-foreground">Audio Forensics</p>
                 <p className="text-xs text-muted-foreground">Voice clone detection, spectrogram analysis</p>
@@ -122,7 +239,12 @@ export default function UploadPage() {
             </label>
 
             <label className="flex items-start gap-3 p-4 rounded-lg border border-border hover:border-primary/50 cursor-pointer transition-colors">
-              <input type="checkbox" defaultChecked className="mt-1 accent-primary" />
+              <input 
+                type="checkbox" 
+                checked={analysisOptions.metadata}
+                onChange={(e) => setAnalysisOptions(prev => ({ ...prev, metadata: e.target.checked }))}
+                className="mt-1 accent-primary" 
+              />
               <div>
                 <p className="font-medium text-foreground">Metadata Analysis</p>
                 <p className="text-xs text-muted-foreground">EXIF, timestamps, device verification</p>
@@ -130,7 +252,12 @@ export default function UploadPage() {
             </label>
 
             <label className="flex items-start gap-3 p-4 rounded-lg border border-border hover:border-primary/50 cursor-pointer transition-colors">
-              <input type="checkbox" className="mt-1 accent-primary" />
+              <input 
+                type="checkbox" 
+                checked={analysisOptions.contextual}
+                onChange={(e) => setAnalysisOptions(prev => ({ ...prev, contextual: e.target.checked }))}
+                className="mt-1 accent-primary" 
+              />
               <div>
                 <p className="font-medium text-foreground">Contextual Verification</p>
                 <p className="text-xs text-muted-foreground">Reverse search, timeline, weather checks</p>
@@ -140,9 +267,24 @@ export default function UploadPage() {
         </div>
 
         {/* Submit Button */}
-        <Button variant="forensic" size="xl" className="w-full">
-          Start Forensic Analysis
-          <ArrowRight className="h-5 w-5 ml-2" />
+        <Button 
+          variant="forensic" 
+          size="xl" 
+          className="w-full"
+          onClick={handleSubmit}
+          disabled={isSubmitting || uploadedFiles.length === 0}
+        >
+          {isSubmitting ? (
+            <>
+              <Loader2 className="h-5 w-5 mr-2 animate-spin" />
+              Processing...
+            </>
+          ) : (
+            <>
+              Start Forensic Analysis
+              <ArrowRight className="h-5 w-5 ml-2" />
+            </>
+          )}
         </Button>
       </div>
     </div>
