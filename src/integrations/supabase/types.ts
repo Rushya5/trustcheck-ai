@@ -14,16 +14,300 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      activity_logs: {
+        Row: {
+          action: string
+          case_id: string | null
+          created_at: string
+          description: string | null
+          icon: string | null
+          icon_color: string | null
+          id: string
+          media_id: string | null
+          title: string
+          user_id: string
+        }
+        Insert: {
+          action: string
+          case_id?: string | null
+          created_at?: string
+          description?: string | null
+          icon?: string | null
+          icon_color?: string | null
+          id?: string
+          media_id?: string | null
+          title: string
+          user_id: string
+        }
+        Update: {
+          action?: string
+          case_id?: string | null
+          created_at?: string
+          description?: string | null
+          icon?: string | null
+          icon_color?: string | null
+          id?: string
+          media_id?: string | null
+          title?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "activity_logs_case_id_fkey"
+            columns: ["case_id"]
+            isOneToOne: false
+            referencedRelation: "cases"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "activity_logs_media_id_fkey"
+            columns: ["media_id"]
+            isOneToOne: false
+            referencedRelation: "media_files"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      analysis_results: {
+        Row: {
+          audio_artifacts: Json | null
+          audio_confidence: number | null
+          audio_manipulation_detected: boolean | null
+          blockchain_tx_id: string | null
+          blockchain_verified_at: string | null
+          completed_at: string | null
+          context_notes: string | null
+          context_verified: boolean | null
+          created_at: string
+          credibility_level:
+            | Database["public"]["Enums"]["credibility_level"]
+            | null
+          credibility_score: number | null
+          exif_data: Json | null
+          heatmap_data: Json | null
+          id: string
+          legal_explanation: string | null
+          media_id: string
+          metadata_integrity_score: number | null
+          metadata_issues: Json | null
+          plain_explanation: string | null
+          processing_started_at: string | null
+          sha256_hash: string | null
+          status: Database["public"]["Enums"]["analysis_status"]
+          technical_explanation: string | null
+          updated_at: string
+          visual_artifacts: Json | null
+          visual_confidence: number | null
+          visual_manipulation_detected: boolean | null
+        }
+        Insert: {
+          audio_artifacts?: Json | null
+          audio_confidence?: number | null
+          audio_manipulation_detected?: boolean | null
+          blockchain_tx_id?: string | null
+          blockchain_verified_at?: string | null
+          completed_at?: string | null
+          context_notes?: string | null
+          context_verified?: boolean | null
+          created_at?: string
+          credibility_level?:
+            | Database["public"]["Enums"]["credibility_level"]
+            | null
+          credibility_score?: number | null
+          exif_data?: Json | null
+          heatmap_data?: Json | null
+          id?: string
+          legal_explanation?: string | null
+          media_id: string
+          metadata_integrity_score?: number | null
+          metadata_issues?: Json | null
+          plain_explanation?: string | null
+          processing_started_at?: string | null
+          sha256_hash?: string | null
+          status?: Database["public"]["Enums"]["analysis_status"]
+          technical_explanation?: string | null
+          updated_at?: string
+          visual_artifacts?: Json | null
+          visual_confidence?: number | null
+          visual_manipulation_detected?: boolean | null
+        }
+        Update: {
+          audio_artifacts?: Json | null
+          audio_confidence?: number | null
+          audio_manipulation_detected?: boolean | null
+          blockchain_tx_id?: string | null
+          blockchain_verified_at?: string | null
+          completed_at?: string | null
+          context_notes?: string | null
+          context_verified?: boolean | null
+          created_at?: string
+          credibility_level?:
+            | Database["public"]["Enums"]["credibility_level"]
+            | null
+          credibility_score?: number | null
+          exif_data?: Json | null
+          heatmap_data?: Json | null
+          id?: string
+          legal_explanation?: string | null
+          media_id?: string
+          metadata_integrity_score?: number | null
+          metadata_issues?: Json | null
+          plain_explanation?: string | null
+          processing_started_at?: string | null
+          sha256_hash?: string | null
+          status?: Database["public"]["Enums"]["analysis_status"]
+          technical_explanation?: string | null
+          updated_at?: string
+          visual_artifacts?: Json | null
+          visual_confidence?: number | null
+          visual_manipulation_detected?: boolean | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "analysis_results_media_id_fkey"
+            columns: ["media_id"]
+            isOneToOne: false
+            referencedRelation: "media_files"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      cases: {
+        Row: {
+          case_number: string
+          created_at: string
+          description: string | null
+          id: string
+          priority: string | null
+          status: Database["public"]["Enums"]["case_status"]
+          title: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          case_number: string
+          created_at?: string
+          description?: string | null
+          id?: string
+          priority?: string | null
+          status?: Database["public"]["Enums"]["case_status"]
+          title: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          case_number?: string
+          created_at?: string
+          description?: string | null
+          id?: string
+          priority?: string | null
+          status?: Database["public"]["Enums"]["case_status"]
+          title?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      media_files: {
+        Row: {
+          case_id: string
+          created_at: string
+          duration: number | null
+          file_name: string
+          file_path: string
+          file_size: number
+          id: string
+          media_type: Database["public"]["Enums"]["media_type"]
+          mime_type: string
+          thumbnail_url: string | null
+          user_id: string
+        }
+        Insert: {
+          case_id: string
+          created_at?: string
+          duration?: number | null
+          file_name: string
+          file_path: string
+          file_size: number
+          id?: string
+          media_type: Database["public"]["Enums"]["media_type"]
+          mime_type: string
+          thumbnail_url?: string | null
+          user_id: string
+        }
+        Update: {
+          case_id?: string
+          created_at?: string
+          duration?: number | null
+          file_name?: string
+          file_path?: string
+          file_size?: number
+          id?: string
+          media_type?: Database["public"]["Enums"]["media_type"]
+          mime_type?: string
+          thumbnail_url?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "media_files_case_id_fkey"
+            columns: ["case_id"]
+            isOneToOne: false
+            referencedRelation: "cases"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      profiles: {
+        Row: {
+          avatar_url: string | null
+          created_at: string
+          display_name: string | null
+          id: string
+          organization: string | null
+          role: string | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          avatar_url?: string | null
+          created_at?: string
+          display_name?: string | null
+          id?: string
+          organization?: string | null
+          role?: string | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          avatar_url?: string | null
+          created_at?: string
+          display_name?: string | null
+          id?: string
+          organization?: string | null
+          role?: string | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      generate_case_number: { Args: never; Returns: string }
     }
     Enums: {
-      [_ in never]: never
+      analysis_status: "pending" | "processing" | "completed" | "failed"
+      case_status: "open" | "analyzing" | "completed" | "archived"
+      credibility_level:
+        | "authentic"
+        | "likely_authentic"
+        | "uncertain"
+        | "likely_manipulated"
+        | "manipulated"
+      media_type: "image" | "video" | "audio"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -150,6 +434,17 @@ export type CompositeTypes<
 
 export const Constants = {
   public: {
-    Enums: {},
+    Enums: {
+      analysis_status: ["pending", "processing", "completed", "failed"],
+      case_status: ["open", "analyzing", "completed", "archived"],
+      credibility_level: [
+        "authentic",
+        "likely_authentic",
+        "uncertain",
+        "likely_manipulated",
+        "manipulated",
+      ],
+      media_type: ["image", "video", "audio"],
+    },
   },
 } as const
