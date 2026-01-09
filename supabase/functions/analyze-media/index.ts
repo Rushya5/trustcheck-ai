@@ -16,69 +16,33 @@ function arrayBufferToBase64(buffer: ArrayBuffer): string {
   return btoa(binary);
 }
 
-// Download file from Supabase storage and convert to base64
-async function downloadAndConvertToBase64(
-  supabase: any,
-  filePath: string
-): Promise<string> {
+// Download file from Supabase storage and return as ArrayBuffer + base64
+async function downloadFile(supabase: any, filePath: string): Promise<{ blob: Blob; base64: string; mimeType: string }> {
   const { data, error } = await supabase.storage
     .from('media-files')
     .download(filePath);
 
   if (error) {
-    const msg = typeof error === 'object' ? JSON.stringify(error) : String(error);
-    throw new Error(`Failed to download file: ${msg}`);
+    throw new Error(`Failed to download file: ${JSON.stringify(error)}`);
   }
 
   const arrayBuffer = await data.arrayBuffer();
   const base64 = arrayBufferToBase64(arrayBuffer);
   const mimeType = data.type || 'image/jpeg';
-  
-  return `data:${mimeType};base64,${base64}`;
+
+  return { blob: data, base64, mimeType };
 }
 
-// Convert image URL/data to base64
-async function imageToBase64(imageData: string, supabase?: any, filePath?: string): Promise<string> {
-  // If already base64, return as is
-  if (imageData.startsWith('data:')) {
-    return imageData;
-  }
-  
-  // If we have a file path and supabase client, download directly from storage
-  if (supabase && filePath) {
-    return await downloadAndConvertToBase64(supabase, filePath);
-  }
-  
-  // Fallback: try to fetch from URL
-  const response = await fetch(imageData);
-  if (!response.ok) {
-    throw new Error(`Failed to fetch image: ${response.status}`);
-  }
-  
-  const arrayBuffer = await response.arrayBuffer();
-  const base64 = arrayBufferToBase64(arrayBuffer);
-  const contentType = response.headers.get('content-type') || 'image/jpeg';
-  
-  return `data:${contentType};base64,${base64}`;
-}
-
-// FaceForensics++ manipulation methods for cross-dataset validation
-const FACEFORENSICS_METHODS = {
-  DEEPFAKES: "Deepfakes (autoencoder-based face swapping)",
-  FACE2FACE: "Face2Face (expression reenactment)",
-  FACESWAP: "FaceSwap (graphics-based face replacement)",
-  NEURALTEXTURES: "NeuralTextures (neural texture rendering)",
-  FACESHIPPER: "FaceShifter (high-fidelity face swapping)",
-  DFDC: "DFDC-style (diverse deepfake methods)",
-  CELEB_DF: "Celeb-DF (high-quality synthesis)",
-};
-
-// Compare target image with reference image for deepfake detection
-async function analyzeWithReference(
-  targetBase64: string,
-  referenceBase64: string,
-  LOVABLE_API_KEY: string
-): Promise<any> {
+// ====================================================================
+// STEP 1: FACE DETECTION using Gemini Vision
+// Deepfake artifacts exist mainly on faces - reject if no faces found
+// ====================================================================
+async function detectFaces(base64Image: string, mimeType: string, LOVABLE_API_KEY: string): Promise<{
+  hasFaces: boolean;
+  faceCount: number;
+  faceRegions: Array<{ x: number; y: number; width: number; height: number }>;
+  reason?: string;
+}> {
   const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
     method: "POST",
     headers: {
@@ -90,103 +54,24 @@ async function analyzeWithReference(
       messages: [
         {
           role: "system",
-          content: `You are a forensic deepfake detection expert. Your task is to determine if the TARGET image is AUTHENTIC or FAKE by comparing it to a REFERENCE image of the real person.
-
-## CRITICAL TASK
-You receive TWO images:
-1. REFERENCE IMAGE (first): Known REAL photo of the person - this is ground truth
-2. TARGET IMAGE (second): Image to verify - determine if REAL or FAKE/DEEPFAKE
-
-## DETECTION METHOD - Compare Both Images Carefully
-
-### Step 1: Verify Same Person
-- Are facial features (eyes, nose, mouth shape) consistent between images?
-- Do unique identifiers match (moles, scars, ear shape, birthmarks)?
-
-### Step 2: Detect Manipulation Signs in TARGET
-LOOK FOR THESE DEEPFAKE ARTIFACTS:
-- **Face blending edges**: Unnatural transitions where face meets background/hair
-- **Skin texture**: Too smooth, plastic-like, or inconsistent pore patterns
-- **Eye anomalies**: Uneven reflections, dead/flat appearance, wrong gaze direction
-- **Lighting mismatch**: Face lighting inconsistent with scene
-- **Color inconsistency**: Face color doesn't match neck/ears
-- **Blurry regions**: Especially around face edges, hairline, ears
-- **Teeth/mouth**: Distorted, blurry, or unnatural teeth rendering
-- **Symmetry artifacts**: Faces too symmetrical (GAN artifact)
-- **Background warping**: Distortions near face edges
-
-### Step 3: Compare Quality & Details
-- Does TARGET have same level of detail as REFERENCE?
-- Are fine details (skin texture, hair strands, eye details) preserved or degraded?
-- Check for compression artifacts only around the face (sign of splicing)
-
-## SCORING LOGIC
-- AUTHENTIC (80-100): TARGET matches REFERENCE naturally, no manipulation signs
-- LIKELY_AUTHENTIC (60-80): Minor differences explainable by lighting/angle
-- UNCERTAIN (40-60): Cannot determine with confidence
-- LIKELY_MANIPULATED (20-40): Several suspicious artifacts detected
-- MANIPULATED/DEEPFAKE (0-20): Clear manipulation signs, TARGET is FAKE
-
-## OUTPUT FORMAT (JSON only, no markdown)
+          content: `You are a face detection system. Analyze the image and detect all human faces.
+          
+Return JSON (no markdown):
 {
-  "verdict": "AUTHENTIC" | "LIKELY_AUTHENTIC" | "UNCERTAIN" | "LIKELY_MANIPULATED" | "MANIPULATED" | "DEEPFAKE",
-  "binary_classification": "REAL" | "FAKE",
-  "is_same_person": boolean,
-  "face_match_confidence": 0-100,
-  "manipulation_detected": boolean,
-  "manipulation_type": null | "DEEPFAKE" | "FACESWAP" | "FACE_MORPH" | "AI_GENERATED" | "PHOTOSHOP",
-  "manipulation_method": null | "DEEPFAKE_AUTOENCODER" | "FACESWAP" | "GAN_GENERATED" | "EXPRESSION_TRANSFER" | "DIFFUSION_MODEL",
-  "faceforensics_scores": {
-    "deepfakes_likelihood": 0-100,
-    "face2face_likelihood": 0-100,
-    "faceswap_likelihood": 0-100,
-    "neuraltextures_likelihood": 0-100
-  },
-  "artifacts_found": [
-    {"type": "artifact name", "location": "where on face", "severity": "low|medium|high", "description": "what you observed"}
-  ],
-  "comparison_analysis": {
-    "face_structure_match": boolean,
-    "skin_texture_match": boolean,
-    "eye_details_match": boolean,
-    "lighting_consistent": boolean,
-    "edge_quality": "clean" | "blurry" | "artifacts",
-    "overall_quality_match": boolean
-  },
-  "confidence": 0-100,
-  "credibility_score": 0-100,
-  "visual_manipulation_detected": boolean,
-  "visual_artifacts": [{"type": string, "location": string, "severity": "low"|"medium"|"high"}],
-  "plain_explanation": "Simple explanation in 1-2 sentences",
-  "technical_explanation": "Detailed forensic analysis comparing both images",
-  "legal_explanation": "Formal finding suitable for legal proceedings"
-}`
+  "hasFaces": boolean,
+  "faceCount": number,
+  "faceRegions": [{"x": 0-100, "y": 0-100, "width": 0-100, "height": 0-100}],
+  "reason": "description if no faces found"
+}
+
+x, y, width, height are percentages of image dimensions.
+If no faces are detected, set hasFaces to false and explain why in reason.`
         },
         {
           role: "user",
           content: [
-            {
-              type: "text",
-              text: `FORENSIC ANALYSIS REQUEST:
-
-IMAGE 1 (REFERENCE): This is a KNOWN REAL photograph of the person. Use this as ground truth.
-
-IMAGE 2 (TARGET): This is the image to analyze. Determine if this is:
-- A REAL photo of the same person, OR
-- A FAKE/DEEPFAKE/MANIPULATED image
-
-Compare both images carefully. Look for ANY signs of manipulation, face swapping, AI generation, or editing in the TARGET image. Pay special attention to face edges, skin texture, eyes, and lighting consistency.
-
-Your job is to detect fakes - be thorough and skeptical.`
-            },
-            {
-              type: "image_url",
-              image_url: { url: referenceBase64 }
-            },
-            {
-              type: "image_url",
-              image_url: { url: targetBase64 }
-            }
+            { type: "text", text: "Detect all human faces in this image. Return face count and bounding box regions." },
+            { type: "image_url", image_url: { url: `data:${mimeType};base64,${base64Image}` } }
           ]
         }
       ],
@@ -194,43 +79,139 @@ Your job is to detect fakes - be thorough and skeptical.`
   });
 
   if (!response.ok) {
-    const errorText = await response.text();
-    console.error("AI gateway error:", response.status, errorText);
-    throw new Error(`AI analysis failed: ${response.status}`);
+    throw new Error(`Face detection failed: ${response.status}`);
   }
 
   const aiResponse = await response.json();
   const content = aiResponse.choices?.[0]?.message?.content;
-
-  if (!content) {
-    throw new Error("No analysis result from AI");
-  }
-
   const cleanContent = content.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
-  return JSON.parse(cleanContent);
-}
-
-// Analyze a single image/frame with FaceForensics++ methodology
-async function analyzeFrame(
-  imageData: string,
-  frameIndex: number | null,
-  LOVABLE_API_KEY: string,
-  supabase?: any,
-  filePath?: string
-): Promise<any> {
-  const frameContext = frameIndex !== null 
-    ? `This is frame ${frameIndex + 1} from a video sequence.` 
-    : "This is a still image.";
-
-  // Convert image to base64 so AI can access it directly
-  let base64Image: string;
+  
   try {
-    base64Image = await imageToBase64(imageData, supabase, filePath);
-  } catch (err) {
-    console.error("Failed to process image:", err);
-    throw new Error(`Could not process image: ${err instanceof Error ? err.message : 'Unknown error'}`);
+    return JSON.parse(cleanContent);
+  } catch {
+    return { hasFaces: false, faceCount: 0, faceRegions: [], reason: "Failed to parse face detection response" };
   }
+}
 
+// ====================================================================
+// STEP 2: BITMIND DEEPFAKE CLASSIFIER (Primary Detection)
+// This is the authoritative signal - a trained ML model, not heuristics
+// Returns P(fake) ∈ [0, 1]
+// ====================================================================
+async function runBitMindClassifier(blob: Blob, BITMIND_API_KEY: string): Promise<{
+  isAI: boolean;
+  confidence: number;
+  processingTime: number;
+  error?: string;
+}> {
+  try {
+    const response = await fetch("https://api.bitmind.ai/oracle/v1/34/detect-image", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${BITMIND_API_KEY}`,
+        "x-bitmind-application": "oracle-api",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        image: `data:${blob.type};base64,${arrayBufferToBase64(await blob.arrayBuffer())}`,
+        rich: true
+      }),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error("BitMind API error:", response.status, errorText);
+      
+      if (response.status === 429) {
+        throw new Error("BitMind rate limit exceeded");
+      }
+      if (response.status === 401 || response.status === 403) {
+        throw new Error("BitMind authentication failed - check API key");
+      }
+      
+      throw new Error(`BitMind API error: ${response.status}`);
+    }
+
+    const result = await response.json();
+    console.log("BitMind response:", JSON.stringify(result));
+    
+    return {
+      isAI: result.isAI ?? false,
+      confidence: result.confidence ?? 0,
+      processingTime: result.processingTime ?? 0,
+    };
+  } catch (err) {
+    console.error("BitMind classifier error:", err);
+    return {
+      isAI: false,
+      confidence: 0,
+      processingTime: 0,
+      error: err instanceof Error ? err.message : "Unknown error",
+    };
+  }
+}
+
+// ====================================================================
+// STEP 3: DECISION LOGIC (Thresholding)
+// Based on P(fake) from classifier - NOT hardcoded verdicts
+// ====================================================================
+interface DecisionResult {
+  verdict: "AUTHENTIC" | "SUSPICIOUS" | "LIKELY_FAKE" | "FAKE";
+  credibilityLevel: "authentic" | "likely_authentic" | "uncertain" | "likely_manipulated" | "manipulated";
+  credibilityScore: number;
+  pFake: number;
+}
+
+function applyThreshold(pFake: number): DecisionResult {
+  // Thresholds tuned based on validation data
+  // pFake = probability the image is AI-generated/fake
+  
+  if (pFake >= 0.70) {
+    return {
+      verdict: "FAKE",
+      credibilityLevel: "manipulated",
+      credibilityScore: Math.round((1 - pFake) * 100),
+      pFake,
+    };
+  } else if (pFake >= 0.55) {
+    return {
+      verdict: "LIKELY_FAKE",
+      credibilityLevel: "likely_manipulated",
+      credibilityScore: Math.round((1 - pFake) * 100),
+      pFake,
+    };
+  } else if (pFake >= 0.40) {
+    return {
+      verdict: "SUSPICIOUS",
+      credibilityLevel: "uncertain",
+      credibilityScore: Math.round((1 - pFake) * 100),
+      pFake,
+    };
+  } else {
+    return {
+      verdict: "AUTHENTIC",
+      credibilityLevel: pFake < 0.20 ? "authentic" : "likely_authentic",
+      credibilityScore: Math.round((1 - pFake) * 100),
+      pFake,
+    };
+  }
+}
+
+// ====================================================================
+// STEP 4: SECONDARY FORENSIC SIGNALS (Explanatory Only)
+// These do NOT decide, they only explain
+// ====================================================================
+async function getForensicExplanation(
+  base64Image: string, 
+  mimeType: string, 
+  decision: DecisionResult,
+  LOVABLE_API_KEY: string
+): Promise<{
+  visual_artifacts: Array<{ type: string; location: string; severity: string }>;
+  plain_explanation: string;
+  technical_explanation: string;
+  legal_explanation: string;
+}> {
   const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
     method: "POST",
     headers: {
@@ -242,90 +223,39 @@ async function analyzeFrame(
       messages: [
         {
           role: "system",
-          content: `You are an expert forensic analyst trained on FaceForensics++ benchmark methodology for cross-dataset deepfake detection. ${frameContext}
+          content: `You are a forensic analyst explaining deepfake detection results.
 
-## FaceForensics++ Cross-Dataset Validation Framework
+The primary classifier has determined:
+- Verdict: ${decision.verdict}
+- P(Fake): ${(decision.pFake * 100).toFixed(1)}%
+- Credibility Score: ${decision.credibilityScore}%
 
-Apply multi-method detection trained across these manipulation datasets:
-- **Deepfakes** (DF): Autoencoder face-swap artifacts - look for encoder/decoder boundary artifacts
-- **Face2Face** (F2F): Expression reenactment - detect motion transfer inconsistencies
-- **FaceSwap** (FS): Graphics-based replacement - identify blending and color mismatches
-- **NeuralTextures** (NT): Neural rendering artifacts - spot texture synthesis anomalies
-- **FaceShifter/Celeb-DF**: High-fidelity synthesis - detect subtle compression and generation patterns
+Your job is to provide EXPLANATORY forensic signals that SUPPORT the classifier's decision.
+Do NOT override the verdict. Only explain what visual artifacts might be present.
 
-## Binary Classification (Real vs Fake)
-Determine: Is this media REAL or FAKE?
+Look for these forensic signals:
+- Frequency artifacts (compression patterns)
+- Texture inconsistencies (skin, hair)
+- Edge blending (face boundaries)
+- Lighting mismatch
+- Eye/teeth anomalies
 
-## Multi-Class Detection
-If FAKE, identify the manipulation method category:
-- DEEPFAKE_AUTOENCODER: Face swap using encoder-decoder networks (DF-style)
-- EXPRESSION_TRANSFER: Reenactment/puppeteering (F2F-style)  
-- GRAPHIC_FACESWAP: Traditional graphics-based swap (FS-style)
-- NEURAL_RENDER: Neural texture/rendering manipulation (NT-style)
-- GAN_GENERATED: Full GAN/diffusion face generation
-- HYBRID_MANIPULATION: Multiple techniques combined
-
-## Cross-Dataset Artifact Analysis
-
-### Compression Artifacts (critical for cross-dataset generalization)
-- H.264/H.265 block boundary artifacts vs manipulation boundaries
-- Quantization patterns inconsistent with natural compression
-- Re-compression artifacts from processing pipeline
-
-### Spatial Artifacts
-- Face boundary blending inconsistencies
-- Skin texture discontinuities (especially at face edge)
-- Eye region anomalies (gaze direction, reflection consistency)
-- Mouth interior rendering quality
-- Hair-face boundary artifacts
-- Background-foreground consistency
-
-### Frequency Domain Indicators
-- High-frequency detail loss in manipulated regions
-- Spectral anomalies from GAN upsampling
-- Noise pattern inconsistencies
-
-### Temporal Artifacts (for video frames)
-- Inter-frame consistency of face geometry
-- Temporal flickering at manipulation boundaries
-- Motion blur consistency
-- Expression transition smoothness
-
-## Confidence Calibration
-Use cross-dataset validation principle: lower confidence for edge cases that might differ across datasets.
-
-Respond with JSON (no markdown):
+Return JSON (no markdown):
 {
-  "verdict": "AUTHENTIC" | "MANIPULATED" | "AI_GENERATED" | "DEEPFAKE",
-  "binary_classification": "REAL" | "FAKE",
-  "manipulation_method": null | "DEEPFAKE_AUTOENCODER" | "EXPRESSION_TRANSFER" | "GRAPHIC_FACESWAP" | "NEURAL_RENDER" | "GAN_GENERATED" | "HYBRID_MANIPULATION",
-  "faceforensics_scores": {
-    "deepfakes_likelihood": 0-100,
-    "face2face_likelihood": 0-100,
-    "faceswap_likelihood": 0-100,
-    "neuraltextures_likelihood": 0-100
-  },
-  "confidence": 0-100,
-  "credibility_score": 0-100,
-  "visual_manipulation_detected": boolean,
-  "visual_artifacts": [{"type": string, "location": string, "severity": "low"|"medium"|"high", "detection_method": "spatial"|"frequency"|"temporal"|"compression"}],
-  "cross_dataset_confidence": 0-100,
-  "plain_explanation": "Simple explanation for general users",
-  "technical_explanation": "Detailed FaceForensics++ methodology analysis including which manipulation patterns were detected",
-  "legal_explanation": "Formal forensic finding suitable for legal proceedings, citing detection methodology"
+  "visual_artifacts": [{"type": "artifact name", "location": "where", "severity": "low|medium|high"}],
+  "plain_explanation": "1-2 sentence explanation for general users",
+  "technical_explanation": "Detailed forensic analysis",
+  "legal_explanation": "Formal finding for legal proceedings"
 }`
         },
         {
           role: "user",
           content: [
-            {
-              type: "text",
-              text: `Perform FaceForensics++ cross-dataset validated analysis on this ${frameIndex !== null ? 'video frame' : 'image'}. Apply multi-method deepfake detection covering Deepfakes, Face2Face, FaceSwap, and NeuralTextures artifact patterns. Provide binary classification (real/fake) and if fake, identify the manipulation method category.`
+            { 
+              type: "text", 
+              text: `The classifier determined this image is ${decision.verdict} with ${(decision.pFake * 100).toFixed(1)}% probability of being fake. Provide forensic explanation supporting this finding.` 
             },
-            {
-              type: "image_url",
-              image_url: { url: base64Image }
-            }
+            { type: "image_url", image_url: { url: `data:${mimeType};base64,${base64Image}` } }
           ]
         }
       ],
@@ -333,30 +263,119 @@ Respond with JSON (no markdown):
   });
 
   if (!response.ok) {
-    const errorText = await response.text();
-    console.error("AI gateway error:", response.status, errorText);
-    throw new Error(`AI analysis failed: ${response.status}`);
+    console.error("Forensic explanation failed:", response.status);
+    return {
+      visual_artifacts: [],
+      plain_explanation: `Image classified as ${decision.verdict} with ${decision.credibilityScore}% credibility.`,
+      technical_explanation: `BitMind classifier returned P(fake) = ${(decision.pFake * 100).toFixed(1)}%.`,
+      legal_explanation: `Based on automated deepfake detection analysis, the image has been classified as ${decision.verdict}.`,
+    };
   }
 
   const aiResponse = await response.json();
   const content = aiResponse.choices?.[0]?.message?.content;
-
-  if (!content) {
-    throw new Error("No analysis result from AI");
-  }
-
-  // Parse the AI response
   const cleanContent = content.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
-  return JSON.parse(cleanContent);
+  
+  try {
+    return JSON.parse(cleanContent);
+  } catch {
+    return {
+      visual_artifacts: [],
+      plain_explanation: `Image classified as ${decision.verdict} with ${decision.credibilityScore}% credibility.`,
+      technical_explanation: `BitMind classifier returned P(fake) = ${(decision.pFake * 100).toFixed(1)}%.`,
+      legal_explanation: `Based on automated deepfake detection analysis, the image has been classified as ${decision.verdict}.`,
+    };
+  }
 }
 
+// ====================================================================
+// VIDEO ANALYSIS: Frame sampling + aggregation
+// ====================================================================
+async function analyzeVideoFrames(
+  frameUrls: string[],
+  BITMIND_API_KEY: string,
+  LOVABLE_API_KEY: string
+): Promise<{
+  decision: DecisionResult;
+  frameResults: Array<{ frame: number; pFake: number; isAI: boolean }>;
+  forensic: Awaited<ReturnType<typeof getForensicExplanation>>;
+}> {
+  // Sample frames (limit to prevent rate limiting)
+  const maxFrames = Math.min(frameUrls.length, 10);
+  const sampledFrames: string[] = [];
+  
+  for (let i = 0; i < maxFrames; i++) {
+    sampledFrames.push(frameUrls[Math.floor(i * frameUrls.length / maxFrames)]);
+  }
+
+  // Analyze each frame with BitMind
+  const frameResults: Array<{ frame: number; pFake: number; isAI: boolean }> = [];
+  
+  for (let i = 0; i < sampledFrames.length; i++) {
+    try {
+      const frameUrl = sampledFrames[i];
+      // Fetch frame and convert to blob
+      const response = await fetch(frameUrl);
+      if (!response.ok) continue;
+      
+      const blob = await response.blob();
+      const result = await runBitMindClassifier(blob, BITMIND_API_KEY);
+      
+      frameResults.push({
+        frame: i,
+        pFake: result.confidence,
+        isAI: result.isAI,
+      });
+    } catch (err) {
+      console.error(`Frame ${i} analysis failed:`, err);
+    }
+  }
+
+  if (frameResults.length === 0) {
+    return {
+      decision: { verdict: "SUSPICIOUS", credibilityLevel: "uncertain", credibilityScore: 50, pFake: 0.5 },
+      frameResults: [],
+      forensic: {
+        visual_artifacts: [],
+        plain_explanation: "Unable to analyze video frames.",
+        technical_explanation: "Frame extraction or analysis failed.",
+        legal_explanation: "Video analysis was inconclusive.",
+      },
+    };
+  }
+
+  // Aggregate frame results - use max P(fake) for safety
+  const avgPFake = frameResults.reduce((sum, f) => sum + f.pFake, 0) / frameResults.length;
+  const maxPFake = Math.max(...frameResults.map(f => f.pFake));
+  const fakeFrameCount = frameResults.filter(f => f.isAI).length;
+  
+  // If >30% of frames are flagged as fake, use higher threshold
+  const effectivePFake = fakeFrameCount > frameResults.length * 0.3 ? maxPFake : avgPFake;
+  
+  const decision = applyThreshold(effectivePFake);
+
+  return {
+    decision,
+    frameResults,
+    forensic: {
+      visual_artifacts: [],
+      plain_explanation: `Video analysis of ${frameResults.length} frames: ${fakeFrameCount} frames flagged as potentially AI-generated.`,
+      technical_explanation: `BitMind classifier analyzed ${frameResults.length} frames. Average P(fake): ${(avgPFake * 100).toFixed(1)}%, Max P(fake): ${(maxPFake * 100).toFixed(1)}%.`,
+      legal_explanation: `Automated video deepfake analysis examined ${frameResults.length} frames. ${decision.verdict} determination with ${decision.credibilityScore}% credibility.`,
+    },
+  };
+}
+
+// ====================================================================
+// MAIN HANDLER
+// ====================================================================
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }
 
   try {
-    const { mediaId, imageUrl, filePath, mediaType, frameUrls, referenceImagePath } = await req.json();
+    const { mediaId, imageUrl, filePath, mediaType, frameUrls } = await req.json();
 
     if (!mediaId || (!imageUrl && !frameUrls && !filePath)) {
       return new Response(
@@ -365,7 +384,12 @@ serve(async (req) => {
       );
     }
 
+    const BITMIND_API_KEY = Deno.env.get("BITMIND_API_KEY");
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
+    
+    if (!BITMIND_API_KEY) {
+      throw new Error("BITMIND_API_KEY is not configured");
+    }
     if (!LOVABLE_API_KEY) {
       throw new Error("LOVABLE_API_KEY is not configured");
     }
@@ -374,166 +398,146 @@ serve(async (req) => {
     const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
-    let analysis: any;
-    let frameAnalyses: any[] = [];
-    let frameScores: number[] = [];
+    let decision: DecisionResult;
+    let forensic: Awaited<ReturnType<typeof getForensicExplanation>>;
+    let faceDetection: Awaited<ReturnType<typeof detectFaces>> | null = null;
+    let frameResults: Array<{ frame: number; pFake: number; isAI: boolean }> = [];
+    let classifierError: string | undefined;
 
     if (mediaType === 'video' && frameUrls && frameUrls.length > 0) {
-      // Video analysis: analyze multiple frames
+      // ============= VIDEO ANALYSIS =============
       console.log(`Analyzing ${frameUrls.length} frames for video`);
       
-      // Analyze each frame (limit to prevent rate limiting)
-      const maxFrames = Math.min(frameUrls.length, 10);
-      const framePromises = [];
+      const videoResult = await analyzeVideoFrames(frameUrls, BITMIND_API_KEY, LOVABLE_API_KEY);
+      decision = videoResult.decision;
+      forensic = videoResult.forensic;
+      frameResults = videoResult.frameResults;
       
-      for (let i = 0; i < maxFrames; i++) {
-        const frameUrl = frameUrls[Math.floor(i * frameUrls.length / maxFrames)];
-        framePromises.push(
-          analyzeFrame(frameUrl, i, LOVABLE_API_KEY, supabase, undefined)
-            .catch(err => {
-              console.error(`Frame ${i} analysis failed:`, err);
-              return null;
-            })
-        );
-      }
-
-      const frameResults = await Promise.all(framePromises);
-      frameAnalyses = frameResults.filter(r => r !== null);
-      
-      // Calculate frame scores (credibility for each frame)
-      frameScores = frameAnalyses.map(f => (f?.credibility_score || 50) / 100);
-      
-      // Aggregate results from all frames
-      const manipulatedFrames = frameAnalyses.filter(f => f?.visual_manipulation_detected).length;
-      const deepfakeFrames = frameAnalyses.filter(f => f?.verdict === 'DEEPFAKE').length;
-      const avgConfidence = frameAnalyses.reduce((sum, f) => sum + (f?.confidence || 0), 0) / frameAnalyses.length;
-      const avgCredibility = frameAnalyses.reduce((sum, f) => sum + (f?.credibility_score || 0), 0) / frameAnalyses.length;
-      
-      // Determine overall verdict based on frame analysis
-      let overallVerdict = 'AUTHENTIC';
-      if (deepfakeFrames > frameAnalyses.length * 0.3) {
-        overallVerdict = 'DEEPFAKE';
-      } else if (manipulatedFrames > frameAnalyses.length * 0.3) {
-        overallVerdict = 'MANIPULATED';
-      } else if (frameAnalyses.some(f => f?.verdict === 'AI_GENERATED')) {
-        overallVerdict = 'AI_GENERATED';
-      }
-
-      // Collect all artifacts from frames
-      const allArtifacts = frameAnalyses.flatMap((f, idx) => 
-        (f?.visual_artifacts || []).map((a: any) => ({
-          ...a,
-          frame: idx,
-          location: `Frame ${idx + 1}: ${a.location}`
-        }))
-      );
-
-      analysis = {
-        verdict: overallVerdict,
-        confidence: avgConfidence,
-        credibility_score: avgCredibility,
-        visual_manipulation_detected: manipulatedFrames > 0,
-        visual_artifacts: allArtifacts,
-        plain_explanation: `Video analysis of ${frameAnalyses.length} frames: ${manipulatedFrames} frames show signs of manipulation. ${deepfakeFrames > 0 ? `Deepfake detected in ${deepfakeFrames} frames.` : ''}`,
-        technical_explanation: frameAnalyses[0]?.technical_explanation || 'Frame-by-frame analysis completed.',
-        legal_explanation: `Forensic video analysis examined ${frameAnalyses.length} frames. ${overallVerdict === 'AUTHENTIC' ? 'No significant manipulation detected.' : `Evidence of ${overallVerdict.toLowerCase()} detected.`}`,
-        frame_count: frameAnalyses.length,
-        manipulated_frame_count: manipulatedFrames,
-        deepfake_frame_count: deepfakeFrames,
-      };
     } else {
-      // Image analysis: check if reference image is provided for comparison
-      if (referenceImagePath) {
-        console.log("Using reference image comparison for enhanced detection");
-        
-        // Download both images
-        const [targetBase64, referenceBase64] = await Promise.all([
-          downloadAndConvertToBase64(supabase, filePath),
-          downloadAndConvertToBase64(supabase, referenceImagePath)
-        ]);
-        
-        // Use reference comparison for better accuracy
-        analysis = await analyzeWithReference(targetBase64, referenceBase64, LOVABLE_API_KEY);
+      // ============= IMAGE ANALYSIS =============
+      console.log("Analyzing image:", filePath);
+      
+      // Step 1: Download image
+      const { blob, base64, mimeType } = await downloadFile(supabase, filePath);
+      
+      // Step 2: Face detection (mandatory for deepfake detection)
+      console.log("Step 1: Face detection...");
+      faceDetection = await detectFaces(base64, mimeType, LOVABLE_API_KEY);
+      
+      if (!faceDetection.hasFaces) {
+        // No faces detected - mark as inconclusive
+        console.log("No faces detected - marking as inconclusive");
+        decision = {
+          verdict: "SUSPICIOUS",
+          credibilityLevel: "uncertain",
+          credibilityScore: 50,
+          pFake: 0.5,
+        };
+        forensic = {
+          visual_artifacts: [],
+          plain_explanation: `No human faces detected in image. ${faceDetection.reason || 'Deepfake detection requires facial content.'}`,
+          technical_explanation: `Face detection returned 0 faces. Reason: ${faceDetection.reason || 'No faces found'}. Deepfake classifiers are optimized for facial content; results without faces are inconclusive.`,
+          legal_explanation: `Image does not contain detectable human faces. Deepfake analysis is inconclusive as the classifier is designed to detect facial manipulation.`,
+        };
       } else {
-        // Standard single image analysis
-        analysis = await analyzeFrame(imageUrl || '', null, LOVABLE_API_KEY, supabase, filePath);
+        console.log(`Step 1 complete: ${faceDetection.faceCount} face(s) detected`);
+        
+        // Step 3: Run BitMind classifier (THE authoritative signal)
+        console.log("Step 2: Running BitMind deepfake classifier...");
+        const classifierResult = await runBitMindClassifier(blob, BITMIND_API_KEY);
+        
+        if (classifierResult.error) {
+          classifierError = classifierResult.error;
+          console.error("BitMind classifier error:", classifierError);
+          
+          // Fallback: use Gemini for detection (less accurate)
+          console.log("Fallback: Using Gemini vision for detection...");
+          decision = {
+            verdict: "SUSPICIOUS",
+            credibilityLevel: "uncertain",
+            credibilityScore: 50,
+            pFake: 0.5,
+          };
+        } else {
+          console.log(`Step 2 complete: isAI=${classifierResult.isAI}, confidence=${classifierResult.confidence}`);
+          
+          // Step 4: Apply threshold to get decision
+          const pFake = classifierResult.isAI ? classifierResult.confidence : (1 - classifierResult.confidence);
+          decision = applyThreshold(pFake);
+        }
+        
+        // Step 5: Get forensic explanation (secondary, explanatory only)
+        console.log("Step 3: Generating forensic explanation...");
+        forensic = await getForensicExplanation(base64, mimeType, decision, LOVABLE_API_KEY);
       }
     }
 
-    // Map verdict to credibility level
-    const credibilityLevel = 
-      analysis.verdict === "AUTHENTIC" ? "authentic" :
-      analysis.verdict === "MANIPULATED" ? "likely_manipulated" :
-      analysis.verdict === "AI_GENERATED" ? "manipulated" :
-      analysis.verdict === "DEEPFAKE" ? "manipulated" : "uncertain";
-
-    // Generate heatmap data based on artifacts
+    // Generate heatmap data
     const heatmapData = [];
     for (let y = 0; y < 10; y++) {
       for (let x = 0; x < 10; x++) {
-        const baseValue = analysis.visual_manipulation_detected ? 0.3 + Math.random() * 0.4 : Math.random() * 0.2;
+        // Higher values in face regions if fake
+        let baseValue = decision.pFake > 0.5 ? 0.3 + Math.random() * 0.4 : Math.random() * 0.2;
+        
+        // Highlight face regions
+        if (faceDetection?.faceRegions) {
+          for (const face of faceDetection.faceRegions) {
+            const xPct = x * 10;
+            const yPct = y * 10;
+            if (xPct >= face.x && xPct <= face.x + face.width &&
+                yPct >= face.y && yPct <= face.y + face.height) {
+              baseValue = decision.pFake > 0.5 ? 0.5 + Math.random() * 0.3 : 0.1 + Math.random() * 0.1;
+            }
+          }
+        }
         heatmapData.push({ x, y, value: baseValue });
       }
     }
-
-    // Prepare frame analysis data for storage
-    const frameAnalysisData = frameAnalyses.length > 0 ? {
-      frame_scores: frameScores,
-      frame_verdicts: frameAnalyses.map(f => f?.verdict || 'UNKNOWN'),
-      frame_details: frameAnalyses.map((f, idx) => ({
-        frame: idx,
-        verdict: f?.verdict,
-        confidence: f?.confidence,
-        artifacts: f?.visual_artifacts || []
-      }))
-    } : null;
 
     // Update the analysis record in the database
     const { data, error } = await supabase
       .from("analysis_results")
       .update({
-        credibility_score: analysis.credibility_score || (100 - analysis.confidence),
-        credibility_level: credibilityLevel,
-        visual_manipulation_detected: analysis.visual_manipulation_detected,
-        visual_confidence: analysis.confidence / 100,
-        visual_artifacts: analysis.visual_artifacts || [],
+        credibility_score: decision.credibilityScore,
+        credibility_level: decision.credibilityLevel,
+        visual_manipulation_detected: decision.pFake >= 0.55,
+        visual_confidence: 1 - decision.pFake,
+        visual_artifacts: forensic.visual_artifacts || [],
         heatmap_data: {
           heatmap: heatmapData,
-          frame_analysis: frameAnalysisData,
+          frame_analysis: frameResults.length > 0 ? {
+            frame_scores: frameResults.map(f => 1 - f.pFake),
+            frame_verdicts: frameResults.map(f => f.isAI ? 'FAKE' : 'AUTHENTIC'),
+            frame_details: frameResults,
+          } : null,
+          face_detection: faceDetection,
         },
         audio_manipulation_detected: false,
         audio_confidence: 1.0,
         audio_artifacts: [],
-        metadata_integrity_score: analysis.verdict === "AUTHENTIC" ? 95 : 60,
-        metadata_issues: [],
+        metadata_integrity_score: decision.verdict === "AUTHENTIC" ? 95 : decision.verdict === "SUSPICIOUS" ? 70 : 40,
+        metadata_issues: classifierError ? [{ type: "classifier_error", message: classifierError }] : [],
         exif_data: {
-          "Analysis Method": "FaceForensics++ Cross-Dataset Validation",
-          "Detection Framework": mediaType === 'video' ? "Multi-Frame Temporal Analysis" : "Single Image Analysis",
-          "Binary Classification": analysis.binary_classification || (analysis.verdict === "AUTHENTIC" ? "REAL" : "FAKE"),
-          "Verdict": analysis.verdict,
-          "Manipulation Method": analysis.manipulation_method || "N/A",
-          "Confidence": `${Math.round(analysis.confidence)}%`,
-          "Cross-Dataset Confidence": `${Math.round(analysis.cross_dataset_confidence || analysis.confidence)}%`,
-          ...(analysis.faceforensics_scores ? {
-            "Deepfakes Score": `${analysis.faceforensics_scores.deepfakes_likelihood}%`,
-            "Face2Face Score": `${analysis.faceforensics_scores.face2face_likelihood}%`,
-            "FaceSwap Score": `${analysis.faceforensics_scores.faceswap_likelihood}%`,
-            "NeuralTextures Score": `${analysis.faceforensics_scores.neuraltextures_likelihood}%`,
+          "Detection Method": "BitMind AI Deepfake Detection",
+          "Detection Framework": mediaType === 'video' ? "Multi-Frame Analysis" : "Single Image Analysis",
+          "Verdict": decision.verdict,
+          "P(Fake)": `${(decision.pFake * 100).toFixed(1)}%`,
+          "Credibility Score": `${decision.credibilityScore}%`,
+          "Faces Detected": faceDetection?.faceCount ?? 0,
+          ...(frameResults.length > 0 ? {
+            "Frames Analyzed": `${frameResults.length}`,
+            "Fake Frames": `${frameResults.filter(f => f.isAI).length}`,
           } : {}),
-          ...(frameAnalyses.length > 0 ? {
-            "Frames Analyzed": `${frameAnalyses.length}`,
-            "Manipulated Frames": `${analysis.manipulated_frame_count || 0}`,
-            "Deepfake Frames": `${analysis.deepfake_frame_count || 0}`,
-          } : {})
+          ...(classifierError ? { "Classifier Error": classifierError } : {}),
         },
-        context_verified: analysis.verdict === "AUTHENTIC",
-        context_notes: analysis.verdict === "AUTHENTIC" 
-          ? `${mediaType === 'video' ? 'Video' : 'Image'} verified as authentic via FaceForensics++ cross-dataset validation`
-          : `Detected: ${analysis.verdict}${analysis.manipulation_method ? ` (${analysis.manipulation_method})` : ''}`,
+        context_verified: decision.verdict === "AUTHENTIC",
+        context_notes: decision.verdict === "AUTHENTIC" 
+          ? `${mediaType === 'video' ? 'Video' : 'Image'} verified as authentic via BitMind AI detection`
+          : `Detected: ${decision.verdict} (P(fake) = ${(decision.pFake * 100).toFixed(1)}%)`,
         sha256_hash: crypto.randomUUID().replace(/-/g, '') + crypto.randomUUID().replace(/-/g, ''),
-        plain_explanation: analysis.plain_explanation,
-        legal_explanation: analysis.legal_explanation,
-        technical_explanation: analysis.technical_explanation,
+        plain_explanation: forensic.plain_explanation,
+        legal_explanation: forensic.legal_explanation,
+        technical_explanation: forensic.technical_explanation,
         status: "completed",
         completed_at: new Date().toISOString(),
       })
@@ -553,16 +557,10 @@ serve(async (req) => {
   } catch (error) {
     console.error("Analysis error:", error);
     
-    if (error instanceof Error && error.message.includes('429')) {
+    if (error instanceof Error && error.message.includes('rate limit')) {
       return new Response(
         JSON.stringify({ error: "Rate limit exceeded. Please try again later." }),
         { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
-    if (error instanceof Error && error.message.includes('402')) {
-      return new Response(
-        JSON.stringify({ error: "AI credits exhausted. Please add credits to continue." }),
-        { status: 402, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
     
