@@ -152,6 +152,117 @@ async function runBitMindClassifier(blob: Blob, BITMIND_API_KEY: string): Promis
 }
 
 // ====================================================================
+// STEP 2B: REALITY DEFENDER (Secondary/Fallback Detection)
+// Enterprise deepfake detection API - async processing
+// ====================================================================
+async function runRealityDefenderClassifier(blob: Blob, fileName: string, REALITY_DEFENDER_API_KEY: string): Promise<{
+  isAI: boolean;
+  confidence: number;
+  processingTime: number;
+  error?: string;
+}> {
+  try {
+    console.log("Starting Reality Defender analysis...");
+    
+    // Step 1: Request a presigned URL for upload
+    const presignedResponse = await fetch("https://api.prd.realitydefender.xyz/api/files/aws-presigned", {
+      method: "POST",
+      headers: {
+        "X-API-KEY": REALITY_DEFENDER_API_KEY,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ fileName }),
+    });
+
+    if (!presignedResponse.ok) {
+      const errorText = await presignedResponse.text();
+      console.error("Reality Defender presigned URL error:", presignedResponse.status, errorText);
+      
+      if (presignedResponse.status === 401 || presignedResponse.status === 403) {
+        throw new Error("Reality Defender authentication failed - check API key");
+      }
+      
+      throw new Error(`Reality Defender presigned URL error: ${presignedResponse.status}`);
+    }
+
+    const presignedData = await presignedResponse.json();
+    const { url: signedUrl, request_id } = presignedData;
+    
+    console.log("Reality Defender upload URL obtained, request_id:", request_id);
+
+    // Step 2: Upload the file to the presigned URL
+    const uploadResponse = await fetch(signedUrl, {
+      method: "PUT",
+      body: blob,
+    });
+
+    if (!uploadResponse.ok) {
+      console.error("Reality Defender upload error:", uploadResponse.status);
+      throw new Error(`Reality Defender upload failed: ${uploadResponse.status}`);
+    }
+    
+    console.log("File uploaded to Reality Defender, polling for results...");
+
+    // Step 3: Poll for results (Reality Defender processes asynchronously)
+    const maxAttempts = 30;
+    const pollInterval = 2000; // 2 seconds
+    
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      await new Promise(resolve => setTimeout(resolve, pollInterval));
+      
+      const resultResponse = await fetch(`https://api.prd.realitydefender.xyz/api/media/users/${request_id}`, {
+        method: "GET",
+        headers: {
+          "X-API-KEY": REALITY_DEFENDER_API_KEY,
+          "Content-Type": "application/json",
+        },
+      });
+
+      if (!resultResponse.ok) {
+        console.error("Reality Defender result fetch error:", resultResponse.status);
+        continue;
+      }
+
+      const resultData = await resultResponse.json();
+      console.log("Reality Defender poll response:", JSON.stringify(resultData));
+      
+      // Check if processing is complete
+      if (resultData.status === "completed" || resultData.results) {
+        // Extract detection result
+        // Reality Defender returns scores per model/signal
+        const overallScore = resultData.score ?? resultData.fake_score ?? 0;
+        const isAI = overallScore >= 0.5;
+        
+        console.log(`Reality Defender complete: score=${overallScore}, isAI=${isAI}`);
+        
+        return {
+          isAI,
+          confidence: isAI ? overallScore : 1 - overallScore,
+          processingTime: attempt * pollInterval,
+        };
+      }
+      
+      if (resultData.status === "failed" || resultData.error) {
+        throw new Error(`Reality Defender processing failed: ${resultData.error || 'Unknown error'}`);
+      }
+      
+      console.log(`Reality Defender poll attempt ${attempt + 1}/${maxAttempts}, status: ${resultData.status}`);
+    }
+    
+    throw new Error("Reality Defender analysis timed out");
+    
+  } catch (err) {
+    console.error("Reality Defender classifier error:", err);
+    return {
+      isAI: false,
+      confidence: 0,
+      processingTime: 0,
+      error: err instanceof Error ? err.message : "Unknown error",
+    };
+  }
+}
+
+// ====================================================================
 // STEP 3: DECISION LOGIC (Thresholding)
 // Based on P(fake) from classifier - NOT hardcoded verdicts
 // ====================================================================
@@ -385,10 +496,11 @@ serve(async (req) => {
     }
 
     const BITMIND_API_KEY = Deno.env.get("BITMIND_API_KEY");
+    const REALITY_DEFENDER_API_KEY = Deno.env.get("REALITY_DEFENDER_API_KEY");
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
     
-    if (!BITMIND_API_KEY) {
-      throw new Error("BITMIND_API_KEY is not configured");
+    if (!BITMIND_API_KEY && !REALITY_DEFENDER_API_KEY) {
+      throw new Error("At least one detection API key (BITMIND_API_KEY or REALITY_DEFENDER_API_KEY) is required");
     }
     if (!LOVABLE_API_KEY) {
       throw new Error("LOVABLE_API_KEY is not configured");
@@ -407,6 +519,10 @@ serve(async (req) => {
     if (mediaType === 'video' && frameUrls && frameUrls.length > 0) {
       // ============= VIDEO ANALYSIS =============
       console.log(`Analyzing ${frameUrls.length} frames for video`);
+      
+      if (!BITMIND_API_KEY) {
+        throw new Error("BITMIND_API_KEY is required for video analysis");
+      }
       
       const videoResult = await analyzeVideoFrames(frameUrls, BITMIND_API_KEY, LOVABLE_API_KEY);
       decision = videoResult.decision;
@@ -442,26 +558,56 @@ serve(async (req) => {
       } else {
         console.log(`Step 1 complete: ${faceDetection.faceCount} face(s) detected`);
         
-        // Step 3: Run BitMind classifier (THE authoritative signal)
-        console.log("Step 2: Running BitMind deepfake classifier...");
-        const classifierResult = await runBitMindClassifier(blob, BITMIND_API_KEY);
+        // Step 3: Run primary classifier
+        let classifierResult: { isAI: boolean; confidence: number; processingTime: number; error?: string };
+        
+        if (BITMIND_API_KEY) {
+          console.log("Step 2: Running BitMind deepfake classifier...");
+          classifierResult = await runBitMindClassifier(blob, BITMIND_API_KEY);
+        } else if (REALITY_DEFENDER_API_KEY) {
+          console.log("Step 2: Running Reality Defender classifier (BitMind not configured)...");
+          classifierResult = await runRealityDefenderClassifier(blob, filePath.split('/').pop() || 'image.jpg', REALITY_DEFENDER_API_KEY);
+        } else {
+          throw new Error("No detection API key configured");
+        }
         
         if (classifierResult.error) {
           classifierError = classifierResult.error;
-          console.error("BitMind classifier error:", classifierError);
+          console.error("Primary classifier error:", classifierError);
           
-          // Fallback: use Gemini for detection (less accurate)
-          console.log("Fallback: Using Gemini vision for detection...");
-          decision = {
-            verdict: "SUSPICIOUS",
-            credibilityLevel: "uncertain",
-            credibilityScore: 50,
-            pFake: 0.5,
-          };
+          // Fallback: Use Reality Defender if BitMind was the primary and failed
+          if (BITMIND_API_KEY && REALITY_DEFENDER_API_KEY) {
+            console.log("Fallback: Using Reality Defender for detection...");
+            const rdResult = await runRealityDefenderClassifier(blob, filePath.split('/').pop() || 'image.jpg', REALITY_DEFENDER_API_KEY);
+            
+            if (rdResult.error) {
+              console.error("Reality Defender also failed:", rdResult.error);
+              classifierError += ` | Reality Defender: ${rdResult.error}`;
+              decision = {
+                verdict: "SUSPICIOUS",
+                credibilityLevel: "uncertain",
+                credibilityScore: 50,
+                pFake: 0.5,
+              };
+            } else {
+              console.log(`Reality Defender complete: isAI=${rdResult.isAI}, confidence=${rdResult.confidence}`);
+              const pFake = rdResult.isAI ? rdResult.confidence : (1 - rdResult.confidence);
+              decision = applyThreshold(pFake);
+              classifierError = undefined; // Clear error since fallback succeeded
+            }
+          } else {
+            console.log("No fallback detector available");
+            decision = {
+              verdict: "SUSPICIOUS",
+              credibilityLevel: "uncertain",
+              credibilityScore: 50,
+              pFake: 0.5,
+            };
+          }
         } else {
           console.log(`Step 2 complete: isAI=${classifierResult.isAI}, confidence=${classifierResult.confidence}`);
           
-          // Step 4: Apply threshold to get decision
+          // Apply threshold to get decision
           const pFake = classifierResult.isAI ? classifierResult.confidence : (1 - classifierResult.confidence);
           decision = applyThreshold(pFake);
         }
