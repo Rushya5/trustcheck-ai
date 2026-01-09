@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Header } from '@/components/layout/Header';
 import { MediaUploader } from '@/components/upload/MediaUploader';
@@ -11,11 +11,14 @@ import { useCases } from '@/hooks/useCases';
 import { useMediaFiles } from '@/hooks/useMediaFiles';
 import { useStartAnalysis } from '@/hooks/useAnalysis';
 import { useActivityLogs } from '@/hooks/useActivityLogs';
-import { ArrowRight, Plus, Loader2 } from 'lucide-react';
+import { useAuth } from '@/contexts/AuthContext';
+import { supabase } from '@/integrations/supabase/client';
+import { ArrowRight, Plus, Loader2, UserCheck, X, Upload } from 'lucide-react';
 import { toast } from 'sonner';
 
 export default function UploadPage() {
   const navigate = useNavigate();
+  const { user } = useAuth();
   const { cases, createCase } = useCases();
   const { uploadMedia } = useMediaFiles();
   const { startAnalysis } = useStartAnalysis();
@@ -28,16 +31,43 @@ export default function UploadPage() {
   const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
   
+  // Reference image for comparison
+  const [referenceImage, setReferenceImage] = useState<File | null>(null);
+  const [referencePreview, setReferencePreview] = useState<string | null>(null);
+  
   const [analysisOptions, setAnalysisOptions] = useState({
     visual: true,
     audio: true,
     metadata: true,
     contextual: false,
+    useReference: false,
   });
 
   const handleFilesUploaded = (files: File[]) => {
     setUploadedFiles(prev => [...prev, ...files]);
   };
+
+  const handleReferenceUpload = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      if (!file.type.startsWith('image/')) {
+        toast.error('Reference must be an image');
+        return;
+      }
+      setReferenceImage(file);
+      setReferencePreview(URL.createObjectURL(file));
+      setAnalysisOptions(prev => ({ ...prev, useReference: true }));
+    }
+  }, []);
+
+  const removeReference = useCallback(() => {
+    setReferenceImage(null);
+    if (referencePreview) {
+      URL.revokeObjectURL(referencePreview);
+    }
+    setReferencePreview(null);
+    setAnalysisOptions(prev => ({ ...prev, useReference: false }));
+  }, [referencePreview]);
 
   const handleSubmit = async () => {
     if (!selectedCase && !createNew) {
@@ -81,6 +111,25 @@ export default function UploadPage() {
         toast.success(`Case "${newCaseName}" created`);
       }
 
+      // Upload reference image first if provided
+      let referenceImagePath: string | undefined;
+      if (referenceImage && analysisOptions.useReference && user) {
+        const refFileName = `${Date.now()}-ref-${referenceImage.name}`;
+        const refPath = `${user.id}/${caseId}/${refFileName}`;
+        
+        const { error: refError } = await supabase.storage
+          .from('media-files')
+          .upload(refPath, referenceImage);
+        
+        if (refError) {
+          console.error('Failed to upload reference image:', refError);
+          toast.error('Failed to upload reference image');
+        } else {
+          referenceImagePath = refPath;
+          toast.success('Reference image uploaded');
+        }
+      }
+
       // Upload files
       for (const file of uploadedFiles) {
         const media = await uploadMedia.mutateAsync({ file, caseId });
@@ -95,9 +144,12 @@ export default function UploadPage() {
           iconColor: 'text-primary',
         });
 
-        // Start analysis
+        // Start analysis with reference image if provided
         toast.info(`Starting analysis for ${file.name}...`);
-        await startAnalysis.mutateAsync(media.id);
+        await startAnalysis.mutateAsync({ 
+          mediaId: media.id,
+          referenceImagePath, // Pass reference for comparison
+        });
 
         await logActivity.mutateAsync({
           action: 'analysis_complete',
@@ -201,9 +253,51 @@ export default function UploadPage() {
           </div>
         </div>
 
+        {/* Reference Image Upload */}
+        <div className="forensic-card p-6">
+          <div className="flex items-center gap-2 mb-4">
+            <UserCheck className="h-5 w-5 text-primary" />
+            <h3 className="font-semibold text-foreground">Reference Image (Real Person)</h3>
+          </div>
+          <p className="text-sm text-muted-foreground mb-4">
+            Upload a known real image of the person for comparison. This significantly improves fake detection accuracy.
+          </p>
+          
+          {!referenceImage ? (
+            <label className="flex flex-col items-center justify-center p-8 border-2 border-dashed border-border rounded-lg cursor-pointer hover:border-primary/50 transition-colors">
+              <Upload className="h-8 w-8 text-muted-foreground mb-2" />
+              <span className="text-sm text-muted-foreground">Click to upload reference image</span>
+              <input 
+                type="file" 
+                accept="image/*"
+                className="hidden"
+                onChange={handleReferenceUpload}
+              />
+            </label>
+          ) : (
+            <div className="relative inline-block">
+              <img 
+                src={referencePreview || ''} 
+                alt="Reference" 
+                className="w-40 h-40 object-cover rounded-lg border border-border"
+              />
+              <button
+                onClick={removeReference}
+                className="absolute -top-2 -right-2 bg-danger text-white rounded-full p-1 hover:bg-danger/80 transition-colors"
+              >
+                <X className="h-4 w-4" />
+              </button>
+              <p className="text-xs text-trust mt-2 flex items-center gap-1">
+                <UserCheck className="h-3 w-3" />
+                Reference image set
+              </p>
+            </div>
+          )}
+        </div>
+
         {/* Media Upload */}
         <div className="forensic-card p-6">
-          <h3 className="font-semibold text-foreground mb-4">Upload Media</h3>
+          <h3 className="font-semibold text-foreground mb-4">Upload Media to Analyze</h3>
           <MediaUploader onUpload={handleFilesUploaded} />
         </div>
 

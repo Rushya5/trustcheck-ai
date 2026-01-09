@@ -74,10 +74,11 @@ interface AnalyzeParams {
 
 interface AnalyzeWithAIParams extends AnalyzeParams {
   filePath: string;
+  referenceImagePath?: string;
 }
 
 // Call the AI analysis edge function
-async function analyzeWithAI({ mediaId, mediaUrl, mediaType, filePath }: AnalyzeWithAIParams): Promise<void> {
+async function analyzeWithAI({ mediaId, mediaUrl, mediaType, filePath, referenceImagePath }: AnalyzeWithAIParams): Promise<void> {
   let frameUrls: string[] | undefined;
   
   // For videos, extract frames client-side (these are already base64)
@@ -103,7 +104,8 @@ async function analyzeWithAI({ mediaId, mediaUrl, mediaType, filePath }: Analyze
         imageUrl: mediaUrl,
         filePath, // Pass file path for direct storage download
         mediaType,
-        frameUrls 
+        frameUrls,
+        referenceImagePath, // Pass reference image path for comparison
       }),
     }
   );
@@ -179,7 +181,7 @@ export function useStartAnalysis() {
   const [progress, setProgress] = useState<Record<string, number>>({});
 
   const startAnalysis = useMutation({
-    mutationFn: async (mediaId: string) => {
+    mutationFn: async ({ mediaId, referenceImagePath }: { mediaId: string; referenceImagePath?: string }) => {
       // Get the media file to get the file path and type
       const { data: mediaFile, error: mediaError } = await supabase
         .from('media_files')
@@ -220,7 +222,8 @@ export function useStartAnalysis() {
           mediaId,
           mediaUrl,
           mediaType: mediaFile.media_type as 'image' | 'video' | 'audio',
-          filePath: mediaFile.file_path, // Pass the file path for storage download
+          filePath: mediaFile.file_path,
+          referenceImagePath, // Pass reference image if provided
         });
         
         clearInterval(progressInterval);
