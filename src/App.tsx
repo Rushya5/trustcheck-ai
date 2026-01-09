@@ -12,6 +12,7 @@ import Dashboard from "./pages/Dashboard";
 import CasesPage from "./pages/CasesPage";
 import UploadPage from "./pages/UploadPage";
 import AnalysisPage from "./pages/AnalysisPage";
+import AnalysisListPage from "./pages/AnalysisListPage";
 import ReportsPage from "./pages/ReportsPage";
 import BlockchainPage from "./pages/BlockchainPage";
 import SettingsPage from "./pages/SettingsPage";
@@ -47,6 +48,11 @@ const App = () => (
             <Route path="/upload" element={
               <ProtectedRoute>
                 <AppLayout><UploadPage /></AppLayout>
+              </ProtectedRoute>
+            } />
+            <Route path="/analysis" element={
+              <ProtectedRoute>
+                <AppLayout><AnalysisListPage /></AppLayout>
               </ProtectedRoute>
             } />
             <Route path="/analysis/:id" element={
