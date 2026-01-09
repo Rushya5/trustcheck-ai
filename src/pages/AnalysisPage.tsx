@@ -54,12 +54,21 @@ export default function AnalysisPage() {
   };
 
   // Generate heatmap data from analysis or default
-  const heatmapData = analysis?.heatmap_data as Array<{ x: number; y: number; value: number }> || 
-    Array.from({ length: 100 }, (_, i) => ({
-      x: i % 10,
-      y: Math.floor(i / 10),
-      value: Math.random() * 0.5
-    }));
+  const rawHeatmapData = analysis?.heatmap_data;
+  const actualHeatmapData = (() => {
+    if (!rawHeatmapData) {
+      return Array.from({ length: 100 }, (_, i) => ({
+        x: i % 10,
+        y: Math.floor(i / 10),
+        value: Math.random() * 0.5
+      }));
+    }
+    // Handle nested heatmap structure
+    if (typeof rawHeatmapData === 'object' && !Array.isArray(rawHeatmapData) && 'heatmap' in rawHeatmapData) {
+      return (rawHeatmapData as { heatmap: Array<{ x: number; y: number; value: number }> }).heatmap;
+    }
+    return rawHeatmapData as Array<{ x: number; y: number; value: number }>;
+  })();
 
   // Parse artifacts arrays - handle both string[] and object[] formats
   type ArtifactObject = { type?: string; location?: string; severity?: string; description?: string };
@@ -164,10 +173,33 @@ export default function AnalysisPage() {
     );
   }
 
-  // Generate frame scores for timeline (simulated based on visual confidence)
-  const frameScores = Array.from({ length: 30 }, () => 
-    (analysis.visual_confidence ? Number(analysis.visual_confidence) : 0.7) + (Math.random() - 0.5) * 0.3
-  );
+  // Extract frame analysis data from heatmap_data if it's a video
+  const heatmapDataParsed = analysis?.heatmap_data as { 
+    heatmap?: Array<{ x: number; y: number; value: number }>;
+    frame_analysis?: {
+      frame_scores: number[];
+      frame_verdicts: string[];
+      frame_details: Array<{
+        frame: number;
+        verdict: string;
+        confidence: number;
+        artifacts: any[];
+      }>;
+    };
+  } | Array<{ x: number; y: number; value: number }> | null;
+
+  const isVideoAnalysis = heatmapDataParsed && 
+    typeof heatmapDataParsed === 'object' && 
+    !Array.isArray(heatmapDataParsed) && 
+    heatmapDataParsed.frame_analysis;
+
+  const frameAnalysis = isVideoAnalysis ? heatmapDataParsed.frame_analysis : null;
+  
+  // Use real frame scores if available, otherwise generate simulated ones
+  const frameScores = frameAnalysis?.frame_scores || 
+    Array.from({ length: 30 }, () => 
+      (analysis.visual_confidence ? Number(analysis.visual_confidence) : 0.7) + (Math.random() - 0.5) * 0.3
+    );
 
   return (
     <div className="min-h-screen">
@@ -258,7 +290,7 @@ export default function AnalysisPage() {
               {/* Heatmap */}
               <div className="forensic-card p-6">
                 <h4 className="font-semibold text-foreground mb-4">Anomaly Heatmap</h4>
-                <HeatmapVisualization data={heatmapData} width={400} height={300} />
+                <HeatmapVisualization data={actualHeatmapData} width={400} height={300} />
               </div>
 
               {/* Analysis Cards */}
@@ -293,12 +325,49 @@ export default function AnalysisPage() {
               </div>
             </div>
 
-            {/* Frame Timeline */}
+            {/* Frame Timeline - Enhanced for video */}
             <div className="forensic-card p-6">
+              <div className="flex items-center justify-between mb-4">
+                <h4 className="font-semibold text-foreground">
+                  {isVideoAnalysis ? 'Video Frame-by-Frame Analysis' : 'Frame Analysis Timeline'}
+                </h4>
+                {isVideoAnalysis && frameAnalysis && (
+                  <Badge variant={frameAnalysis.frame_verdicts.includes('DEEPFAKE') ? 'destructive' : 'secondary'}>
+                    {frameAnalysis.frame_scores.length} Frames Analyzed
+                  </Badge>
+                )}
+              </div>
               <FrameTimeline 
                 scores={frameScores}
                 currentFrame={selectedFrame}
               />
+              {isVideoAnalysis && frameAnalysis && (
+                <div className="mt-4 grid grid-cols-2 md:grid-cols-4 gap-3">
+                  {frameAnalysis.frame_details.slice(0, 8).map((frame, idx) => (
+                    <div 
+                      key={idx} 
+                      className={`p-3 rounded-lg border ${
+                        frame.verdict === 'AUTHENTIC' 
+                          ? 'border-trust/30 bg-trust/5' 
+                          : frame.verdict === 'DEEPFAKE'
+                          ? 'border-danger/30 bg-danger/5'
+                          : 'border-warning/30 bg-warning/5'
+                      }`}
+                    >
+                      <p className="text-xs font-medium">Frame {frame.frame + 1}</p>
+                      <p className={`text-sm font-bold ${
+                        frame.verdict === 'AUTHENTIC' ? 'text-trust' :
+                        frame.verdict === 'DEEPFAKE' ? 'text-danger' : 'text-warning'
+                      }`}>
+                        {frame.verdict}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        {Math.round(frame.confidence)}% confidence
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </TabsContent>
 
