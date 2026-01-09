@@ -1,1 +1,4 @@
 project_id = "rbmcvnzeynebkrmniwtk"
+
+[functions.analyze-media]
+verify_jwt = false
