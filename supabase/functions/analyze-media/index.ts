@@ -73,6 +73,130 @@ const FACEFORENSICS_METHODS = {
   CELEB_DF: "Celeb-DF (high-quality synthesis)",
 };
 
+// Compare target image with reference image for deepfake detection
+async function analyzeWithReference(
+  targetBase64: string,
+  referenceBase64: string,
+  LOVABLE_API_KEY: string
+): Promise<any> {
+  const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${LOVABLE_API_KEY}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model: "google/gemini-2.5-flash",
+      messages: [
+        {
+          role: "system",
+          content: `You are an expert forensic analyst specializing in deepfake detection using REFERENCE IMAGE COMPARISON.
+
+## Your Task
+You are given TWO images:
+1. **REFERENCE IMAGE (First image)**: A KNOWN REAL/AUTHENTIC image of a person
+2. **TARGET IMAGE (Second image)**: The image to analyze - determine if this is REAL or FAKE/MANIPULATED
+
+## Critical Comparison Points
+Compare the TARGET against the REFERENCE looking for:
+
+### Face Structure Analysis
+- Facial proportions (eye distance, nose width, jaw shape)
+- Bone structure consistency
+- Ear shape and position
+- Hairline pattern
+
+### Skin & Texture Analysis  
+- Skin texture patterns and pores
+- Wrinkle patterns and locations
+- Moles, freckles, scars positioning
+- Skin tone gradients
+
+### Fine Detail Comparison
+- Eye color and iris patterns
+- Teeth alignment and shape
+- Lip shape and color
+- Eyebrow patterns
+
+### Deepfake Artifacts (in TARGET only)
+- Unnatural blending at face edges
+- Inconsistent lighting on face vs background
+- Blurry or morphed regions
+- Temporal artifacts if applicable
+- GAN fingerprints
+
+## Scoring
+- If TARGET matches REFERENCE naturally = AUTHENTIC (high credibility 80-100)
+- If TARGET shows manipulation signs = FAKE/DEEPFAKE (low credibility 0-40)
+- If uncertain = moderate credibility (40-60)
+
+Respond with JSON only (no markdown):
+{
+  "verdict": "AUTHENTIC" | "MANIPULATED" | "DEEPFAKE",
+  "binary_classification": "REAL" | "FAKE",
+  "is_same_person": boolean,
+  "face_match_confidence": 0-100,
+  "manipulation_detected": boolean,
+  "manipulation_method": null | "DEEPFAKE_AUTOENCODER" | "FACESWAP" | "GAN_GENERATED" | "EXPRESSION_TRANSFER",
+  "faceforensics_scores": {
+    "deepfakes_likelihood": 0-100,
+    "face2face_likelihood": 0-100,
+    "faceswap_likelihood": 0-100,
+    "neuraltextures_likelihood": 0-100
+  },
+  "confidence": 0-100,
+  "credibility_score": 0-100,
+  "visual_manipulation_detected": boolean,
+  "visual_artifacts": [{"type": string, "location": string, "severity": "low"|"medium"|"high"}],
+  "comparison_details": {
+    "face_structure_match": boolean,
+    "skin_texture_match": boolean,
+    "fine_details_match": boolean,
+    "artifacts_detected": string[]
+  },
+  "plain_explanation": "Simple explanation",
+  "technical_explanation": "Detailed comparison analysis",
+  "legal_explanation": "Forensic finding for legal proceedings"
+}`
+        },
+        {
+          role: "user",
+          content: [
+            {
+              type: "text",
+              text: "Compare these two images. The FIRST image is the REFERENCE (known real image of the person). The SECOND image is the TARGET to analyze. Determine if the TARGET is authentic or a deepfake/manipulation of the person in the reference."
+            },
+            {
+              type: "image_url",
+              image_url: { url: referenceBase64 }
+            },
+            {
+              type: "image_url",
+              image_url: { url: targetBase64 }
+            }
+          ]
+        }
+      ],
+    }),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    console.error("AI gateway error:", response.status, errorText);
+    throw new Error(`AI analysis failed: ${response.status}`);
+  }
+
+  const aiResponse = await response.json();
+  const content = aiResponse.choices?.[0]?.message?.content;
+
+  if (!content) {
+    throw new Error("No analysis result from AI");
+  }
+
+  const cleanContent = content.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+  return JSON.parse(cleanContent);
+}
+
 // Analyze a single image/frame with FaceForensics++ methodology
 async function analyzeFrame(
   imageData: string,
@@ -219,7 +343,7 @@ serve(async (req) => {
   }
 
   try {
-    const { mediaId, imageUrl, filePath, mediaType, frameUrls } = await req.json();
+    const { mediaId, imageUrl, filePath, mediaType, frameUrls, referenceImagePath } = await req.json();
 
     if (!mediaId || (!imageUrl && !frameUrls && !filePath)) {
       return new Response(
@@ -305,8 +429,22 @@ serve(async (req) => {
         deepfake_frame_count: deepfakeFrames,
       };
     } else {
-      // Image analysis: single frame - pass filePath for direct storage download
-      analysis = await analyzeFrame(imageUrl || '', null, LOVABLE_API_KEY, supabase, filePath);
+      // Image analysis: check if reference image is provided for comparison
+      if (referenceImagePath) {
+        console.log("Using reference image comparison for enhanced detection");
+        
+        // Download both images
+        const [targetBase64, referenceBase64] = await Promise.all([
+          downloadAndConvertToBase64(supabase, filePath),
+          downloadAndConvertToBase64(supabase, referenceImagePath)
+        ]);
+        
+        // Use reference comparison for better accuracy
+        analysis = await analyzeWithReference(targetBase64, referenceBase64, LOVABLE_API_KEY);
+      } else {
+        // Standard single image analysis
+        analysis = await analyzeFrame(imageUrl || '', null, LOVABLE_API_KEY, supabase, filePath);
+      }
     }
 
     // Map verdict to credibility level
