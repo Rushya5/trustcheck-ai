@@ -10,6 +10,7 @@ import Index from "./pages/Index";
 import AuthPage from "./pages/AuthPage";
 import Dashboard from "./pages/Dashboard";
 import CasesPage from "./pages/CasesPage";
+import CaseDetailPage from "./pages/CaseDetailPage";
 import UploadPage from "./pages/UploadPage";
 import AnalysisPage from "./pages/AnalysisPage";
 import AnalysisListPage from "./pages/AnalysisListPage";
@@ -42,7 +43,7 @@ const App = () => (
             } />
             <Route path="/cases/:id" element={
               <ProtectedRoute>
-                <AppLayout><AnalysisPage /></AppLayout>
+                <AppLayout><CaseDetailPage /></AppLayout>
               </ProtectedRoute>
             } />
             <Route path="/upload" element={
