@@ -28,9 +28,9 @@ import {
 } from 'lucide-react';
 
 export default function AnalysisPage() {
-  const { mediaId } = useParams<{ mediaId: string }>();
+  const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { analysis, isLoading, error } = useAnalysis(mediaId);
+  const { analysis, isLoading, error } = useAnalysis(id);
   const [selectedFrame] = useState(0);
   const [isGeneratingReport, setIsGeneratingReport] = useState(false);
 
