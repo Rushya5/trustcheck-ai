@@ -1,47 +1,61 @@
+import { useNavigate } from 'react-router-dom';
 import { Header } from '@/components/layout/Header';
 import { BlockchainVerification } from '@/components/blockchain/BlockchainVerification';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Skeleton } from '@/components/ui/skeleton';
+import { useBlockchainRecords } from '@/hooks/useReports';
 import { 
   Blocks, 
   Link as LinkIcon, 
   Shield, 
   CheckCircle,
   Clock,
-  ExternalLink
+  ExternalLink,
+  AlertTriangle,
+  FileQuestion
 } from 'lucide-react';
 
-const mockTransactions = [
-  {
-    id: 'tx-001',
-    hash: '0x7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b',
-    txId: '0x1234567890abcdef1234567890abcdef12345678',
-    timestamp: new Date('2024-01-16T14:32:00'),
-    caseId: 'case-001',
-    caseName: 'Political Speech Verification',
-    verified: true,
-  },
-  {
-    id: 'tx-002',
-    hash: '0x8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c',
-    txId: '0x234567890abcdef1234567890abcdef123456789',
-    timestamp: new Date('2024-01-15T09:15:00'),
-    caseId: 'case-002',
-    caseName: 'Celebrity Interview Analysis',
-    verified: true,
-  },
-  {
-    id: 'tx-003',
-    hash: '0x9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d',
-    txId: '0x34567890abcdef1234567890abcdef1234567890',
-    timestamp: new Date('2024-01-12T16:45:00'),
-    caseId: 'case-003',
-    caseName: 'Financial Statement Audio',
-    verified: true,
-  },
-];
-
 export default function BlockchainPage() {
+  const { records, isLoading, error, stats } = useBlockchainRecords();
+  const navigate = useNavigate();
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen">
+        <Header title="Blockchain Verification" subtitle="Immutable integrity records" />
+        <div className="p-6 space-y-6">
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+            {[...Array(4)].map((_, i) => (
+              <Skeleton key={i} className="h-24 rounded-lg" />
+            ))}
+          </div>
+          <Skeleton className="h-32 rounded-lg" />
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            {[...Array(4)].map((_, i) => (
+              <Skeleton key={i} className="h-40 rounded-lg" />
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="min-h-screen">
+        <Header title="Blockchain Verification" subtitle="Immutable integrity records" />
+        <div className="p-6">
+          <div className="forensic-card p-8 text-center">
+            <AlertTriangle className="h-12 w-12 text-warning mx-auto mb-4" />
+            <h3 className="text-lg font-semibold mb-2">Failed to Load Records</h3>
+            <p className="text-muted-foreground">{error.message}</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen">
       <Header 
@@ -57,7 +71,7 @@ export default function BlockchainPage() {
               <Blocks className="h-6 w-6 text-primary" />
             </div>
             <div>
-              <p className="text-2xl font-bold font-mono text-foreground">1,247</p>
+              <p className="text-2xl font-bold font-mono text-foreground">{stats.totalRecords}</p>
               <p className="text-sm text-muted-foreground">Total Records</p>
             </div>
           </div>
@@ -66,7 +80,7 @@ export default function BlockchainPage() {
               <CheckCircle className="h-6 w-6 text-trust" />
             </div>
             <div>
-              <p className="text-2xl font-bold font-mono text-foreground">1,247</p>
+              <p className="text-2xl font-bold font-mono text-foreground">{stats.verifiedRecords}</p>
               <p className="text-sm text-muted-foreground">Verified</p>
             </div>
           </div>
@@ -75,7 +89,7 @@ export default function BlockchainPage() {
               <LinkIcon className="h-6 w-6 text-analysis" />
             </div>
             <div>
-              <p className="text-2xl font-bold font-mono text-foreground">89,432</p>
+              <p className="text-2xl font-bold font-mono text-foreground">—</p>
               <p className="text-sm text-muted-foreground">Block Height</p>
             </div>
           </div>
@@ -84,7 +98,7 @@ export default function BlockchainPage() {
               <Clock className="h-6 w-6 text-warning" />
             </div>
             <div>
-              <p className="text-2xl font-bold font-mono text-foreground">2.3s</p>
+              <p className="text-2xl font-bold font-mono text-foreground">~2s</p>
               <p className="text-sm text-muted-foreground">Avg Confirm Time</p>
             </div>
           </div>
@@ -110,11 +124,11 @@ export default function BlockchainPage() {
             </div>
             <div>
               <p className="text-muted-foreground">Gas Price</p>
-              <p className="font-mono text-foreground">30 Gwei</p>
+              <p className="font-mono text-foreground">~30 Gwei</p>
             </div>
             <div>
               <p className="text-muted-foreground">Last Sync</p>
-              <p className="font-mono text-foreground">2 seconds ago</p>
+              <p className="font-mono text-foreground">Live</p>
             </div>
           </div>
         </div>
@@ -131,22 +145,36 @@ export default function BlockchainPage() {
             </Button>
           </div>
 
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            {mockTransactions.map((tx, index) => (
-              <div 
-                key={tx.id}
-                className="animate-fade-in"
-                style={{ animationDelay: `${index * 100}ms` }}
-              >
-                <BlockchainVerification
-                  hash={tx.hash}
-                  txId={tx.txId}
-                  timestamp={tx.timestamp}
-                  verified={tx.verified}
-                />
-              </div>
-            ))}
-          </div>
+          {records.length === 0 ? (
+            <div className="forensic-card p-8 text-center">
+              <FileQuestion className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
+              <h3 className="text-lg font-semibold mb-2">No Blockchain Records</h3>
+              <p className="text-muted-foreground mb-4">
+                Complete an analysis to create your first blockchain verification record.
+              </p>
+              <Button onClick={() => navigate('/upload')}>
+                Upload Media
+              </Button>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              {records.map((record, index) => (
+                <div 
+                  key={record.id}
+                  className="animate-fade-in cursor-pointer"
+                  style={{ animationDelay: `${index * 100}ms` }}
+                  onClick={() => navigate(`/analysis/${record.media_id}`)}
+                >
+                  <BlockchainVerification
+                    hash={record.sha256_hash || ''}
+                    txId={record.blockchain_tx_id || ''}
+                    timestamp={record.blockchain_verified_at ? new Date(record.blockchain_verified_at) : undefined}
+                    verified={!!record.blockchain_tx_id}
+                  />
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       </div>
     </div>
