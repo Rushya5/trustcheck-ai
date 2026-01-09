@@ -97,15 +97,10 @@ export function useMediaFiles(caseId?: string) {
 
   const deleteMedia = useMutation({
     mutationFn: async ({ id, filePath }: { id: string; filePath: string }) => {
-      // Delete from storage
-      await supabase.storage.from('media-files').remove([filePath]);
-      
-      // Delete from database
-      const { error } = await supabase
-        .from('media_files')
-        .delete()
-        .eq('id', id);
-      
+      const { error } = await supabase.functions.invoke('delete-media', {
+        body: { mediaId: id, filePath },
+      });
+
       if (error) throw error;
     },
     onSuccess: () => {
