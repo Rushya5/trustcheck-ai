@@ -90,73 +90,76 @@ async function analyzeWithReference(
       messages: [
         {
           role: "system",
-          content: `You are an expert forensic analyst specializing in deepfake detection using REFERENCE IMAGE COMPARISON.
+          content: `You are a forensic deepfake detection expert. Your task is to determine if the TARGET image is AUTHENTIC or FAKE by comparing it to a REFERENCE image of the real person.
 
-## Your Task
-You are given TWO images:
-1. **REFERENCE IMAGE (First image)**: A KNOWN REAL/AUTHENTIC image of a person
-2. **TARGET IMAGE (Second image)**: The image to analyze - determine if this is REAL or FAKE/MANIPULATED
+## CRITICAL TASK
+You receive TWO images:
+1. REFERENCE IMAGE (first): Known REAL photo of the person - this is ground truth
+2. TARGET IMAGE (second): Image to verify - determine if REAL or FAKE/DEEPFAKE
 
-## Critical Comparison Points
-Compare the TARGET against the REFERENCE looking for:
+## DETECTION METHOD - Compare Both Images Carefully
 
-### Face Structure Analysis
-- Facial proportions (eye distance, nose width, jaw shape)
-- Bone structure consistency
-- Ear shape and position
-- Hairline pattern
+### Step 1: Verify Same Person
+- Are facial features (eyes, nose, mouth shape) consistent between images?
+- Do unique identifiers match (moles, scars, ear shape, birthmarks)?
 
-### Skin & Texture Analysis  
-- Skin texture patterns and pores
-- Wrinkle patterns and locations
-- Moles, freckles, scars positioning
-- Skin tone gradients
+### Step 2: Detect Manipulation Signs in TARGET
+LOOK FOR THESE DEEPFAKE ARTIFACTS:
+- **Face blending edges**: Unnatural transitions where face meets background/hair
+- **Skin texture**: Too smooth, plastic-like, or inconsistent pore patterns
+- **Eye anomalies**: Uneven reflections, dead/flat appearance, wrong gaze direction
+- **Lighting mismatch**: Face lighting inconsistent with scene
+- **Color inconsistency**: Face color doesn't match neck/ears
+- **Blurry regions**: Especially around face edges, hairline, ears
+- **Teeth/mouth**: Distorted, blurry, or unnatural teeth rendering
+- **Symmetry artifacts**: Faces too symmetrical (GAN artifact)
+- **Background warping**: Distortions near face edges
 
-### Fine Detail Comparison
-- Eye color and iris patterns
-- Teeth alignment and shape
-- Lip shape and color
-- Eyebrow patterns
+### Step 3: Compare Quality & Details
+- Does TARGET have same level of detail as REFERENCE?
+- Are fine details (skin texture, hair strands, eye details) preserved or degraded?
+- Check for compression artifacts only around the face (sign of splicing)
 
-### Deepfake Artifacts (in TARGET only)
-- Unnatural blending at face edges
-- Inconsistent lighting on face vs background
-- Blurry or morphed regions
-- Temporal artifacts if applicable
-- GAN fingerprints
+## SCORING LOGIC
+- AUTHENTIC (80-100): TARGET matches REFERENCE naturally, no manipulation signs
+- LIKELY_AUTHENTIC (60-80): Minor differences explainable by lighting/angle
+- UNCERTAIN (40-60): Cannot determine with confidence
+- LIKELY_MANIPULATED (20-40): Several suspicious artifacts detected
+- MANIPULATED/DEEPFAKE (0-20): Clear manipulation signs, TARGET is FAKE
 
-## Scoring
-- If TARGET matches REFERENCE naturally = AUTHENTIC (high credibility 80-100)
-- If TARGET shows manipulation signs = FAKE/DEEPFAKE (low credibility 0-40)
-- If uncertain = moderate credibility (40-60)
-
-Respond with JSON only (no markdown):
+## OUTPUT FORMAT (JSON only, no markdown)
 {
-  "verdict": "AUTHENTIC" | "MANIPULATED" | "DEEPFAKE",
+  "verdict": "AUTHENTIC" | "LIKELY_AUTHENTIC" | "UNCERTAIN" | "LIKELY_MANIPULATED" | "MANIPULATED" | "DEEPFAKE",
   "binary_classification": "REAL" | "FAKE",
   "is_same_person": boolean,
   "face_match_confidence": 0-100,
   "manipulation_detected": boolean,
-  "manipulation_method": null | "DEEPFAKE_AUTOENCODER" | "FACESWAP" | "GAN_GENERATED" | "EXPRESSION_TRANSFER",
+  "manipulation_type": null | "DEEPFAKE" | "FACESWAP" | "FACE_MORPH" | "AI_GENERATED" | "PHOTOSHOP",
+  "manipulation_method": null | "DEEPFAKE_AUTOENCODER" | "FACESWAP" | "GAN_GENERATED" | "EXPRESSION_TRANSFER" | "DIFFUSION_MODEL",
   "faceforensics_scores": {
     "deepfakes_likelihood": 0-100,
     "face2face_likelihood": 0-100,
     "faceswap_likelihood": 0-100,
     "neuraltextures_likelihood": 0-100
   },
+  "artifacts_found": [
+    {"type": "artifact name", "location": "where on face", "severity": "low|medium|high", "description": "what you observed"}
+  ],
+  "comparison_analysis": {
+    "face_structure_match": boolean,
+    "skin_texture_match": boolean,
+    "eye_details_match": boolean,
+    "lighting_consistent": boolean,
+    "edge_quality": "clean" | "blurry" | "artifacts",
+    "overall_quality_match": boolean
+  },
   "confidence": 0-100,
   "credibility_score": 0-100,
   "visual_manipulation_detected": boolean,
   "visual_artifacts": [{"type": string, "location": string, "severity": "low"|"medium"|"high"}],
-  "comparison_details": {
-    "face_structure_match": boolean,
-    "skin_texture_match": boolean,
-    "fine_details_match": boolean,
-    "artifacts_detected": string[]
-  },
-  "plain_explanation": "Simple explanation",
-  "technical_explanation": "Detailed comparison analysis",
-  "legal_explanation": "Forensic finding for legal proceedings"
+  "plain_explanation": "Simple explanation in 1-2 sentences",
+  "technical_explanation": "Detailed forensic analysis comparing both images",
+  "legal_explanation": "Formal finding suitable for legal proceedings"
 }`
         },
         {
@@ -164,7 +167,17 @@ Respond with JSON only (no markdown):
           content: [
             {
               type: "text",
-              text: "Compare these two images. The FIRST image is the REFERENCE (known real image of the person). The SECOND image is the TARGET to analyze. Determine if the TARGET is authentic or a deepfake/manipulation of the person in the reference."
+              text: `FORENSIC ANALYSIS REQUEST:
+
+IMAGE 1 (REFERENCE): This is a KNOWN REAL photograph of the person. Use this as ground truth.
+
+IMAGE 2 (TARGET): This is the image to analyze. Determine if this is:
+- A REAL photo of the same person, OR
+- A FAKE/DEEPFAKE/MANIPULATED image
+
+Compare both images carefully. Look for ANY signs of manipulation, face swapping, AI generation, or editing in the TARGET image. Pay special attention to face edges, skin texture, eyes, and lighting consistency.
+
+Your job is to detect fakes - be thorough and skeptical.`
             },
             {
               type: "image_url",
